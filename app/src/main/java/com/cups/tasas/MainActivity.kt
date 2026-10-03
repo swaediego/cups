@@ -18,7 +18,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -64,7 +63,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -193,12 +191,6 @@ private fun Screen(vm: RatesViewModel) {
             vm.error?.let {
                 Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
             }
-
-            Text(
-                "Tasa oficial BCV · se actualiza al abrir la app",
-                color = Muted, fontSize = 13.sp, fontFamily = Manrope,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp), textAlign = TextAlign.Center,
-            )
         }
     }
 
@@ -239,11 +231,6 @@ private fun PickDialog(vm: RatesViewModel, onDismiss: () -> Unit) {
 @Composable
 private fun Header(loading: Boolean, onRefresh: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Image(
-            painterResource(R.drawable.logo), null,
-            Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
         Text("cups", color = Ink, fontSize = 30.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.weight(1f))
         val spin = rememberInfiniteTransition(label = "spin").animateFloat(
