@@ -97,6 +97,10 @@ import java.util.Locale
 // Los colores leen el estado del tema, así que toda la interfaz se redibuja al cambiarlo.
 internal object AppTheme {
     var dark by mutableStateOf(false)
+    /** "auto" (sigue al teléfono), "light" u "dark". */
+    var mode by mutableStateOf("auto")
+    var systemDark = false
+    fun resolve() = when (mode) { "dark" -> true; "light" -> false; else -> systemDark }
 }
 private fun themed(light: Long, dark: Long) = Color(if (AppTheme.dark) dark else light)
 
@@ -138,7 +142,9 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
-        AppTheme.dark = vm.initialDark(resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        // Si el teléfono cambia de claro a oscuro, la actividad se recrea y esto se recalcula (modo automático)
+        AppTheme.systemDark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        vm.loadTheme()
         // Aviso de "actualización disponible": permiso de notificaciones (Android 13+) y chequeo periódico
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -299,10 +305,10 @@ private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, 
             Modifier.size(48.dp).clip(CircleShape).background(Surface1)
                 .border(1.dp, Line, CircleShape)
                 .clickable(role = Role.Button, onClick = onTheme)
-                .semantics { contentDescription = if (AppTheme.dark) "Cambiar a modo claro" else "Cambiar a modo oscuro" },
+                .semantics { contentDescription = "Tema: " + when (AppTheme.mode) { "dark" -> "oscuro"; "light" -> "claro"; else -> "automático" } },
             contentAlignment = Alignment.Center,
         ) {
-            ThemeIcon(AppTheme.dark, Ink, Modifier.size(22.dp))
+            ThemeIcon(AppTheme.mode, Ink, Modifier.size(22.dp))
         }
         Spacer(Modifier.width(10.dp))
         val spin = rememberInfiniteTransition(label = "spin").animateFloat(
@@ -349,10 +355,14 @@ private fun UpdateDialog(vm: RatesViewModel, u: Update, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ThemeIcon(dark: Boolean, color: Color, modifier: Modifier) = Canvas(modifier) {
+private fun ThemeIcon(mode: String, color: Color, modifier: Modifier) = Canvas(modifier) {
     val w = size.width * 0.09f
     val s = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    if (dark) { // sol: pasar a modo claro
+    if (mode == "auto") { // círculo medio lleno: sigue al teléfono
+        val r = size.width * 0.38f
+        drawCircle(color, radius = r, center = center, style = s)
+        drawArc(color, -90f, 180f, true, Offset(center.x - r, center.y - r), Size(2 * r, 2 * r))
+    } else if (mode == "light") { // sol
         drawCircle(color, radius = size.width * 0.18f, center = center, style = s)
         for (i in 0 until 8) {
             val a = Math.toRadians(i * 45.0)
@@ -360,7 +370,7 @@ private fun ThemeIcon(dark: Boolean, color: Color, modifier: Modifier) = Canvas(
             drawLine(color, Offset(center.x + c * size.width * 0.32f, center.y + sn * size.width * 0.32f),
                 Offset(center.x + c * size.width * 0.44f, center.y + sn * size.width * 0.44f), w, StrokeCap.Round)
         }
-    } else { // luna: pasar a modo oscuro
+    } else { // luna
         val p = Path().apply {
             moveTo(size.width * 0.84f, size.height * 0.60f)
             cubicTo(size.width * 0.62f, size.height * 0.80f, size.width * 0.26f, size.height * 0.70f, size.width * 0.22f, size.height * 0.36f)
