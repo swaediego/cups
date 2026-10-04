@@ -21,6 +21,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -103,8 +105,11 @@ private val RedInk = Color(0xFFC0291D)
 private val CoinInk = Color(0xFF05101F)
 private val Warn = Color(0xFF9A5B00)
 
-private fun accentOf(c: Cur) = if (c == Cur.USD) Gold else Blue
-private fun inkOf(c: Cur) = if (c == Cur.USD) GoldInk else BlueInk
+private val Green = Color(0xFF2BC48A)
+private val GreenInk = Color(0xFF0F7A55)
+
+private fun accentOf(c: Cur) = when (c) { Cur.USD -> Gold; Cur.EUR -> Blue; Cur.USDT -> Green }
+private fun inkOf(c: Cur) = when (c) { Cur.USD -> GoldInk; Cur.EUR -> BlueInk; Cur.USDT -> GreenInk }
 
 private val Manrope = FontFamily(
     listOf(400, 500, 600, 700, 800).map { w ->
@@ -167,15 +172,21 @@ private fun Screen(vm: RatesViewModel) {
 
             DateBar(vm, ink, onPick = { picking = true })
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Cur.entries.forEach { c ->
                     RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
                 }
             }
 
+            ChangeCard(cur, vm.changeFor(cur), ink)
+
+            ModeToggle(vm.mode, ink, vm::onMode)
+
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            Column(
+            if (vm.mode == Mode.Calc) {
+                CalcCard(vm, cur, r, accent, ink)
+            } else Column(
                 Modifier.fillMaxWidth()
                     .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
                     .clip(shape)
@@ -186,6 +197,9 @@ private fun Screen(vm: RatesViewModel) {
                 AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
                 Divider(cur, r)
                 AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
+            }
+            if (vm.mode == Mode.Convert && (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty())) {
+                Pill("Reiniciar a 0", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
             }
 
             vm.error?.let {
@@ -323,20 +337,20 @@ private fun RateTile(c: Cur, r: Rate?, selected: Boolean, modifier: Modifier, on
     Column(
         modifier.clip(shape).background(fill).border(if (selected) 1.5.dp else 1.dp, stroke, shape)
             .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Coin(c.symbol, accent, 26)
-            Text(c.label, color = if (selected) Ink else Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Coin(c.symbol, accent, 22)
+            Text(c.label, color = if (selected) Ink else Muted, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
         }
         Text(
             r?.let { money(it.value) } ?: "—",
-            color = Ink, fontSize = 26.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
+            color = Ink, fontSize = 20.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
             letterSpacing = (-0.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
         )
         Text(
-            r?.let { shortDate(it.date) } ?: "sin datos",
+            r?.let { if (c == Cur.USDT && it.date == LocalDate.now()) "en vivo" else shortDate(it.date) } ?: "sin datos",
             color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
         )
     }
@@ -505,4 +519,150 @@ private fun CalendarIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
     drawLine(color, Offset(size.width * 0.12f, size.height * 0.44f), Offset(size.width * 0.88f, size.height * 0.44f), s.width, StrokeCap.Round)
     drawLine(color, Offset(size.width * 0.32f, size.height * 0.08f), Offset(size.width * 0.32f, size.height * 0.28f), s.width, StrokeCap.Round)
     drawLine(color, Offset(size.width * 0.68f, size.height * 0.08f), Offset(size.width * 0.68f, size.height * 0.28f), s.width, StrokeCap.Round)
+}
+
+@Composable
+private fun ChangeCard(c: Cur, ch: Change?, ink: Color) {
+    val shape = RoundedCornerShape(20.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp).semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (ch == null) {
+            Text("Sin dato anterior para comparar", color = Muted, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
+            return@Row
+        }
+        val up = ch.diff > 0.0049
+        val down = ch.diff < -0.0049
+        val tone = if (up) RedInk else if (down) GreenInk else Muted
+        val verb = if (up) "subió" else if (down) "bajó" else "se mantuvo"
+        val sign = if (up) "▲ +" else if (down) "▼ −" else "• "
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("${c.label} $verb vs. ${shortDate(ch.since)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+            Text(
+                "$sign${money(kotlin.math.abs(ch.diff))} Bs", color = tone, fontSize = 20.sp, fontFamily = Manrope,
+                fontWeight = FontWeight.ExtraBold, style = TextStyle(fontFeatureSettings = TNUM),
+            )
+        }
+        Text(
+            "${if (up) "+" else if (down) "−" else ""}${String.format(Locale.GERMANY, "%.2f", kotlin.math.abs(ch.pct))}%",
+            color = tone, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+            modifier = Modifier.clip(CircleShape).background(tone.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun ModeToggle(mode: Mode, ink: Color, onMode: (Mode) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(4.dp)) {
+        listOf(Mode.Convert to "Convertir", Mode.Calc to "Calculadora").forEach { (m, label) ->
+            val sel = m == mode
+            Box(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (sel) Paper else Color.Transparent)
+                    .selectable(selected = sel, role = Role.Tab) { onMode(m) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, color = if (sel) ink else Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Pill(text: String, ink: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Text(
+        text, color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+        modifier = modifier.heightIn(min = 40.dp).clip(CircleShape).background(Surface1).border(1.dp, Line, CircleShape)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink: Color) {
+    val inBs = vm.calcInBs
+    val fromSym = if (inBs) "Bs" else cur.symbol
+    val toSym = if (inBs) cur.symbol else "Bs"
+    val toInk = if (inBs) ink else RedInk
+    val shown = vm.expr.ifEmpty { "0" }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalAlignment = Alignment.End) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "$fromSym → $toSym", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                r?.let {
+                    Text("1 ${cur.symbol} = ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Text(
+                shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
+                fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
+                maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
+            Text(
+                "$toSym ${money(vm.calcConverted ?: 0.0)}", color = toInk, fontSize = 26.sp, fontFamily = Manrope,
+                fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        val rows = listOf(
+            listOf("C", "⇄", "00", "÷"),
+            listOf("7", "8", "9", "×"),
+            listOf("4", "5", "6", "−"),
+            listOf("1", "2", "3", "+"),
+            listOf("0", ",", "⌫", "="),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            rows.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(1f), vm) }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm: RatesViewModel) {
+    val haptic = LocalHapticFeedback.current
+    val isOp = k in listOf("÷", "×", "−", "+")
+    val bg = when {
+        k == "=" -> ink
+        k == "C" -> accent.copy(alpha = 0.28f)
+        isOp || k == "⇄" -> Blue.copy(alpha = 0.12f)
+        k == "⌫" -> Line
+        else -> Surface1
+    }
+    val fg = when {
+        k == "=" -> Paper
+        k == "C" || isOp || k == "⇄" -> ink
+        else -> Ink
+    }
+    Box(
+        modifier.height(64.dp).clip(CircleShape).background(bg)
+            .combinedClickable(
+                role = Role.Button,
+                onClick = { if (k == "⇄") vm.toggleCalcSide() else vm.key(k) },
+                // Mantener pulsado ⌫ reinicia todo el monto de golpe
+                onLongClick = if (k == "⌫") ({ haptic.performHapticFeedback(HapticFeedbackType.LongPress); vm.key("C") }) else null,
+            )
+            .semantics {
+                contentDescription = when (k) {
+                    "C" -> "Borrar todo"
+                    "⌫" -> "Borrar un dígito, mantener para borrar todo"
+                    "⇄" -> "Invertir conversión"
+                    else -> k
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (k == "C") "AC" else k, color = fg, fontSize = if (k == "C") 20.sp else 26.sp, fontFamily = Manrope, fontWeight = if (isOp || k == "=") FontWeight.Bold else FontWeight.Medium)
+    }
 }
