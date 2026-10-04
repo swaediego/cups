@@ -199,7 +199,7 @@ private fun Screen(vm: RatesViewModel) {
                 AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
             }
             if (vm.mode == Mode.Convert && (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty())) {
-                Pill("Reiniciar a 0", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
+                Pill("Reiniciar", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
             }
 
             vm.error?.let {
