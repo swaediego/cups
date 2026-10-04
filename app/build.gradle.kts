@@ -15,9 +15,21 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
+    // Llave fija del proyecto (keystore/cups.keystore, fuera de git): todo APK que se publique
+    // debe firmarse con ella para que Android permita actualizar encima de la versión instalada.
+    signingConfigs {
+        create("cups") {
+            storeFile = rootProject.file("keystore/cups.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("cups") }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("cups")
         }
     }
     compileOptions {
@@ -36,4 +48,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

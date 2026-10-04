@@ -95,7 +95,49 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     private var pinned by mutableStateOf<LocalDate?>(null)
     private var lastEdited = Field.Foreign
 
+    /** Versión más nueva publicada en GitHub (null = al día o sin dato). */
+    var update by mutableStateOf<Update?>(null)
+        private set
+    /** Avance de la descarga (0..1); null = no se está descargando. */
+    var updateProgress by mutableStateOf<Float?>(null)
+        private set
+    var updateMsg by mutableStateOf<String?>(null)
+        private set
+
     init { refresh() }
+
+    fun checkUpdate() {
+        viewModelScope.launch {
+            val ctx = getApplication<Application>()
+            val u = withContext(Dispatchers.IO) { runCatching { Updater.fetchLatest() }.getOrNull() }
+            update = u?.takeIf { Updater.isNewer(it.version, Updater.installedVersion(ctx)) }
+        }
+    }
+
+    fun clearUpdateMsg() { updateMsg = null }
+
+    /** Descarga el APK y abre el instalador del sistema; el usuario solo confirma. */
+    fun startUpdate() {
+        val u = update ?: return
+        if (updateProgress != null) return
+        val ctx = getApplication<Application>()
+        if (!Updater.canInstall(ctx)) {
+            updateMsg = "Permite instalar desde cups en la pantalla que se abre y vuelve a tocar Actualizar."
+            Updater.askInstallPermission(ctx)
+            return
+        }
+        viewModelScope.launch {
+            updateProgress = 0f
+            updateMsg = null
+            try {
+                val file = withContext(Dispatchers.IO) { Updater.download(ctx, u) { updateProgress = it } }
+                Updater.install(ctx, file)
+            } catch (e: Exception) {
+                updateMsg = "No se pudo descargar la actualización. Revisa tu conexión."
+            }
+            updateProgress = null
+        }
+    }
 
     /** Fechas de publicación del BCV (el USDT no marca fechas de navegación). */
     val dates: List<LocalDate>
@@ -142,6 +184,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refresh() {
+        checkUpdate()
         viewModelScope.launch {
             loading = true
             error = null

@@ -35,8 +35,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
@@ -128,6 +130,14 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        // Aviso de "actualización disponible": permiso de notificaciones (Android 13+) y chequeo periódico
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+                .launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        Updater.schedule(applicationContext)
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
@@ -155,6 +165,7 @@ private fun Screen(vm: RatesViewModel) {
     val ink by animateColorAsState(inkOf(cur), tween(450), label = "ink")
     val keyboard = LocalSoftwareKeyboardController.current
     var picking by remember { mutableStateOf(false) }
+    var updating by remember { mutableStateOf(false) }
 
     Box(
         Modifier.fillMaxSize().background(Paper).drawBehind {
@@ -168,7 +179,7 @@ private fun Screen(vm: RatesViewModel) {
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Header(vm.loading, onRefresh = vm::refresh)
+            Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true })
 
             DateBar(vm, ink, onPick = { picking = true })
 
@@ -208,6 +219,8 @@ private fun Screen(vm: RatesViewModel) {
         }
     }
 
+    if (updating) vm.update?.let { UpdateDialog(vm, it, onDismiss = { updating = false }) }
+
     if (picking && vm.selectedDate != null) {
         PickDialog(vm, onDismiss = { picking = false })
     }
@@ -243,10 +256,23 @@ private fun PickDialog(vm: RatesViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun Header(loading: Boolean, onRefresh: () -> Unit) {
+private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, onUpdate: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("cups", color = Ink, fontSize = 30.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.weight(1f))
+        if (hasUpdate) {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).background(Surface1)
+                    .border(1.dp, Line, CircleShape)
+                    .clickable(role = Role.Button, onClick = onUpdate)
+                    .semantics { contentDescription = "Actualización disponible" },
+                contentAlignment = Alignment.Center,
+            ) {
+                UpdateIcon(Ink, Modifier.size(22.dp))
+                Box(Modifier.align(Alignment.TopEnd).padding(7.dp).size(10.dp).clip(CircleShape).background(Red).border(2.dp, Paper, CircleShape))
+            }
+            Spacer(Modifier.width(10.dp))
+        }
         val spin = rememberInfiniteTransition(label = "spin").animateFloat(
             0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "deg",
         )
@@ -260,6 +286,47 @@ private fun Header(loading: Boolean, onRefresh: () -> Unit) {
             RefreshIcon(Ink, Modifier.size(20.dp).rotate(if (loading) spin.value else 0f))
         }
     }
+}
+
+@Composable
+private fun UpdateDialog(vm: RatesViewModel, u: Update, onDismiss: () -> Unit) {
+    val progress = vm.updateProgress
+    AlertDialog(
+        onDismissRequest = { if (progress == null) { vm.clearUpdateMsg(); onDismiss() } },
+        containerColor = Paper,
+        title = { Text("Actualización disponible", fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, color = Ink) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("cups ${u.version} está listo para instalar.", fontFamily = Manrope, color = Muted, fontSize = 14.sp)
+                if (u.notes.isNotBlank()) Text(u.notes.trim().take(300), fontFamily = Manrope, color = Ink, fontSize = 13.sp)
+                if (progress != null) LinearProgressIndicator(progress = { progress }, Modifier.fillMaxWidth(), color = BlueInk, trackColor = Line)
+                vm.updateMsg?.let { Text(it, fontFamily = Manrope, color = Warn, fontSize = 13.sp) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = progress == null, onClick = vm::startUpdate) {
+                Text(if (progress == null) "Actualizar" else "Descargando…", fontFamily = Manrope, fontWeight = FontWeight.Bold, color = BlueInk)
+            }
+        },
+        dismissButton = {
+            TextButton(enabled = progress == null, onClick = { vm.clearUpdateMsg(); onDismiss() }) {
+                Text("Más tarde", fontFamily = Manrope, color = Muted)
+            }
+        },
+    )
+}
+
+@Composable
+private fun UpdateIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val s = Stroke(width = size.width * 0.095f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    drawLine(color, Offset(size.width * 0.5f, size.height * 0.14f), Offset(size.width * 0.5f, size.height * 0.64f), s.width, StrokeCap.Round)
+    val head = Path().apply {
+        moveTo(size.width * 0.28f, size.height * 0.44f)
+        lineTo(size.width * 0.5f, size.height * 0.66f)
+        lineTo(size.width * 0.72f, size.height * 0.44f)
+    }
+    drawPath(head, color, style = s)
+    drawLine(color, Offset(size.width * 0.2f, size.height * 0.86f), Offset(size.width * 0.8f, size.height * 0.86f), s.width, StrokeCap.Round)
 }
 
 @Composable
