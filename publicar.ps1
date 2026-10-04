@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+if ((git branch --show-current) -ne "main") { throw "Publica desde main (la skill 'publicar' pasa antes los cambios de prueba a main)" }
+
 $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
 if (-not $gh) { $gh = "C:\Program Files\GitHub CLI\gh.exe" }
 if (-not (Test-Path $gh)) { throw "Falta GitHub CLI (winget install GitHub.cli)" }
