@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -91,24 +92,31 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-// Modo claro: papel blanco, tinta azul noche. Dorado (dólar), azul (euro) y rojo (Bs) vienen del logo.
-private val Paper = Color(0xFFFFFFFF)
-private val Surface1 = Color(0xFFF5F7FC)
-private val Line = Color(0xFFE2E8F3)
-private val Ink = Color(0xFF0B1220)
-private val Muted = Color(0xFF5A6684)
-private val Hint = Color(0xFF7F8BA8)
+// Claro: papel blanco, tinta azul noche. Oscuro: fondo azul noche, tinta clara.
+// Dorado (dólar), azul (euro), rojo (Bs) y verde (USDT) vienen del logo y no cambian; solo sus "tintas" para texto.
+// Los colores leen el estado del tema, así que toda la interfaz se redibuja al cambiarlo.
+internal object AppTheme {
+    var dark by mutableStateOf(false)
+}
+private fun themed(light: Long, dark: Long) = Color(if (AppTheme.dark) dark else light)
+
+private val Paper get() = themed(0xFFFFFFFF, 0xFF0B1220)
+private val Surface1 get() = themed(0xFFF5F7FC, 0xFF151D30)
+private val Line get() = themed(0xFFE2E8F3, 0xFF26324C)
+private val Ink get() = themed(0xFF0B1220, 0xFFEAF0FF)
+private val Muted get() = themed(0xFF5A6684, 0xFF9AA7C4)
+private val Hint get() = themed(0xFF7F8BA8, 0xFF66728F)
 private val Gold = Color(0xFFFFB92E)
-private val GoldInk = Color(0xFF8F5A00)
+private val GoldInk get() = themed(0xFF8F5A00, 0xFFFFC857)
 private val Blue = Color(0xFF3D8BFF)
-private val BlueInk = Color(0xFF1F5FD6)
+private val BlueInk get() = themed(0xFF1F5FD6, 0xFF7DB0FF)
 private val Red = Color(0xFFFF5A4D)
-private val RedInk = Color(0xFFC0291D)
+private val RedInk get() = themed(0xFFC0291D, 0xFFFF8A80)
 private val CoinInk = Color(0xFF05101F)
-private val Warn = Color(0xFF9A5B00)
+private val Warn get() = themed(0xFF9A5B00, 0xFFFFB84D)
 
 private val Green = Color(0xFF2BC48A)
-private val GreenInk = Color(0xFF0F7A55)
+private val GreenInk get() = themed(0xFF0F7A55, 0xFF5FDDAE)
 
 private fun accentOf(c: Cur) = when (c) { Cur.USD -> Gold; Cur.EUR -> Blue; Cur.USDT -> Green }
 private fun inkOf(c: Cur) = when (c) { Cur.USD -> GoldInk; Cur.EUR -> BlueInk; Cur.USDT -> GreenInk }
@@ -119,7 +127,7 @@ private val Manrope = FontFamily(
     }
 )
 private const val TNUM = "tnum"
-private val SoftShadow = Color(0x330B1220)
+private val SoftShadow get() = if (AppTheme.dark) Color(0x99000000) else Color(0x330B1220)
 
 class MainActivity : ComponentActivity() {
     private val vm: RatesViewModel by viewModels()
@@ -130,6 +138,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        AppTheme.dark = vm.initialDark(resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
         // Aviso de "actualización disponible": permiso de notificaciones (Android 13+) y chequeo periódico
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -139,13 +148,26 @@ class MainActivity : ComponentActivity() {
         }
         Updater.schedule(applicationContext)
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = BlueInk, onPrimary = Paper, background = Paper, surface = Paper,
-                    onSurface = Ink, onSurfaceVariant = Muted, surfaceContainerHigh = Paper,
-                    surfaceContainerHighest = Surface1, outlineVariant = Line,
-                ),
-            ) {
+            val dark = AppTheme.dark
+            // Barras del sistema e iconos según el tema, y fondo de ventana para que no parpadee en blanco
+            LaunchedEffect(dark) {
+                val bar = android.graphics.Color.TRANSPARENT
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) SystemBarStyle.dark(bar) else SystemBarStyle.light(bar, bar),
+                    navigationBarStyle = if (dark) SystemBarStyle.dark(bar) else SystemBarStyle.light(bar, bar),
+                )
+                window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Paper.toArgb()))
+            }
+            val scheme = if (dark) androidx.compose.material3.darkColorScheme(
+                primary = BlueInk, onPrimary = Paper, background = Paper, surface = Paper,
+                onSurface = Ink, onSurfaceVariant = Muted, surfaceContainerHigh = Paper,
+                surfaceContainerHighest = Surface1, outlineVariant = Line,
+            ) else lightColorScheme(
+                primary = BlueInk, onPrimary = Paper, background = Paper, surface = Paper,
+                onSurface = Ink, onSurfaceVariant = Muted, surfaceContainerHigh = Paper,
+                surfaceContainerHighest = Surface1, outlineVariant = Line,
+            )
+            MaterialTheme(colorScheme = scheme) {
                 Screen(vm)
             }
         }
@@ -179,7 +201,7 @@ private fun Screen(vm: RatesViewModel) {
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true })
+            Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onTheme = vm::toggleTheme)
 
             DateBar(vm, ink, onPick = { picking = true })
 
@@ -256,7 +278,7 @@ private fun PickDialog(vm: RatesViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, onUpdate: () -> Unit) {
+private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, onUpdate: () -> Unit, onTheme: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("cups", color = Ink, fontSize = 30.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.weight(1f))
@@ -273,6 +295,16 @@ private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, 
             }
             Spacer(Modifier.width(10.dp))
         }
+        Box(
+            Modifier.size(48.dp).clip(CircleShape).background(Surface1)
+                .border(1.dp, Line, CircleShape)
+                .clickable(role = Role.Button, onClick = onTheme)
+                .semantics { contentDescription = if (AppTheme.dark) "Cambiar a modo claro" else "Cambiar a modo oscuro" },
+            contentAlignment = Alignment.Center,
+        ) {
+            ThemeIcon(AppTheme.dark, Ink, Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(10.dp))
         val spin = rememberInfiniteTransition(label = "spin").animateFloat(
             0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "deg",
         )
@@ -314,6 +346,30 @@ private fun UpdateDialog(vm: RatesViewModel, u: Update, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+@Composable
+private fun ThemeIcon(dark: Boolean, color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.09f
+    val s = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    if (dark) { // sol: pasar a modo claro
+        drawCircle(color, radius = size.width * 0.18f, center = center, style = s)
+        for (i in 0 until 8) {
+            val a = Math.toRadians(i * 45.0)
+            val c = Math.cos(a).toFloat(); val sn = Math.sin(a).toFloat()
+            drawLine(color, Offset(center.x + c * size.width * 0.32f, center.y + sn * size.width * 0.32f),
+                Offset(center.x + c * size.width * 0.44f, center.y + sn * size.width * 0.44f), w, StrokeCap.Round)
+        }
+    } else { // luna: pasar a modo oscuro
+        val p = Path().apply {
+            moveTo(size.width * 0.84f, size.height * 0.60f)
+            cubicTo(size.width * 0.62f, size.height * 0.80f, size.width * 0.26f, size.height * 0.70f, size.width * 0.22f, size.height * 0.36f)
+            cubicTo(size.width * 0.20f, size.height * 0.24f, size.width * 0.26f, size.height * 0.16f, size.width * 0.34f, size.height * 0.12f)
+            cubicTo(size.width * 0.14f, size.height * 0.20f, size.width * 0.10f, size.height * 0.52f, size.width * 0.28f, size.height * 0.72f)
+            cubicTo(size.width * 0.46f, size.height * 0.90f, size.width * 0.76f, size.height * 0.86f, size.width * 0.84f, size.height * 0.60f)
+        }
+        drawPath(p, color, style = s)
+    }
 }
 
 @Composable
@@ -652,7 +708,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val inBs = vm.calcInBs
     val fromSym = if (inBs) "Bs" else cur.symbol
     val toSym = if (inBs) cur.symbol else "Bs"
-    val toInk = if (inBs) ink else RedInk
+    val toInk = if (inBs) ink else Muted
     val shown = vm.expr.ifEmpty { "0" }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalAlignment = Alignment.End) {

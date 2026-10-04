@@ -116,6 +116,19 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearUpdateMsg() { updateMsg = null }
 
+    /** Tema elegido por el usuario ("dark" | "light"); sin elección sigue al sistema. */
+    fun initialDark(system: Boolean): Boolean = when (prefs.getString("theme", null)) {
+        "dark" -> true
+        "light" -> false
+        else -> system
+    }
+
+    fun toggleTheme() {
+        val next = !AppTheme.dark
+        AppTheme.dark = next
+        prefs.edit().putString("theme", if (next) "dark" else "light").apply()
+    }
+
     /** Descarga el APK y abre el instalador del sistema; el usuario solo confirma. */
     fun startUpdate() {
         val u = update ?: return
