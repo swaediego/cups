@@ -12,8 +12,8 @@ android {
         applicationId = "com.cups.tasas"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
     // Llave fija del proyecto (keystore/cups.keystore, fuera de git): todo APK que se publique
     // debe firmarse con ella para que Android permita actualizar encima de la versión instalada.
