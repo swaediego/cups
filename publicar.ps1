@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Notas = ""
 )
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # git escribe avisos por stderr; los pasos críticos comprueban $LASTEXITCODE
 Set-Location $PSScriptRoot
 
 if ((git branch --show-current) -ne "main") { throw "Publica desde main (la skill 'publicar' pasa antes los cambios de prueba a main)" }
