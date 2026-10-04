@@ -8,7 +8,22 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -131,10 +146,41 @@ private val Manrope = FontFamily(
     }
 )
 private const val TNUM = "tnum"
+// Curvas de la web: salida fuerte para entradas y respuestas; otra para el movimiento en pantalla
+private val EaseOut = CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+private val EaseMove = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+
+/** Texto que, al cambiar, entra con un leve ascenso y fundido (la salida es más rápida). No anima la primera pintura. */
+@Composable
+private fun Tick(text: String, modifier: Modifier = Modifier, content: @Composable (String) -> Unit) {
+    AnimatedContent(
+        targetState = text, modifier = modifier, label = "tick",
+        transitionSpec = {
+            (fadeIn(tween(240, easing = EaseOut)) + slideInVertically(tween(260, easing = EaseOut)) { it / 4 })
+                .togetherWith(fadeOut(tween(90)))
+                .using(SizeTransform(clip = false))
+        },
+    ) { content(it) }
+}
+
+/** Primera carga: cada sección entra subiendo y apareciendo, en escalera (una sola vez). */
+@Composable
+private fun Reveal(index: Int, content: @Composable () -> Unit) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(index * 45L); shown = true }
+    val p by animateFloatAsState(if (shown) 1f else 0f, tween(550, easing = EaseOut), label = "reveal")
+    Box(Modifier.graphicsLayer { alpha = p; translationY = (1f - p) * 14.dp.toPx() }) { content() }
+}
+
 private val SoftShadow get() = if (AppTheme.dark) Color(0x99000000) else Color(0x330B1220)
 
 class MainActivity : ComponentActivity() {
     private val vm: RatesViewModel by viewModels()
+
+    override fun onResume() {
+        super.onResume()
+        vm.checkUpdate(force = false)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -189,8 +235,8 @@ private fun longDate(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("EEE d
 @Composable
 private fun Screen(vm: RatesViewModel) {
     val cur = vm.currency
-    val accent by animateColorAsState(accentOf(cur), tween(450), label = "accent")
-    val ink by animateColorAsState(inkOf(cur), tween(450), label = "ink")
+    val accent by animateColorAsState(accentOf(cur), tween(500, easing = EaseOut), label = "accent")
+    val ink by animateColorAsState(inkOf(cur), tween(500, easing = EaseOut), label = "ink")
     val keyboard = LocalSoftwareKeyboardController.current
     var picking by remember { mutableStateOf(false) }
     var updating by remember { mutableStateOf(false) }
@@ -207,35 +253,50 @@ private fun Screen(vm: RatesViewModel) {
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onTheme = vm::toggleTheme)
+            Reveal(0) { Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onTheme = vm::toggleTheme) }
 
-            DateBar(vm, ink, onPick = { picking = true })
+            Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Cur.entries.forEach { c ->
-                    RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+            Reveal(2) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Cur.entries.forEach { c ->
+                        RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+                    }
                 }
             }
 
-            ChangeCard(cur, vm.changeFor(cur), ink)
+            Reveal(3) { ChangeCard(cur, vm.changeFor(cur), ink) }
 
-            ModeToggle(vm.mode, ink, vm::onMode)
+            Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) }
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            if (vm.mode == Mode.Calc) {
-                CalcCard(vm, cur, r, accent, ink)
-            } else Column(
-                Modifier.fillMaxWidth()
-                    .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
-                    .clip(shape)
-                    .background(Paper)
-                    .border(BorderStroke(1.dp, Brush.verticalGradient(listOf(accent.copy(alpha = 0.6f), Line))), shape)
-                    .padding(vertical = 8.dp),
-            ) {
-                AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
-                Divider(cur, r)
-                AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
+            Reveal(5) {
+                // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
+                AnimatedContent(
+                    targetState = vm.mode, label = "panel",
+                    transitionSpec = {
+                        (fadeIn(tween(260, easing = EaseOut)) + slideInVertically(tween(280, easing = EaseOut)) { it / 24 } +
+                            scaleIn(tween(280, easing = EaseOut), initialScale = 0.985f))
+                            .togetherWith(fadeOut(tween(90)))
+                            .using(SizeTransform(clip = false) { _, _ -> tween(300, easing = EaseMove) })
+                    },
+                ) { m ->
+                    if (m == Mode.Calc) {
+                        CalcCard(vm, cur, r, accent, ink)
+                    } else Column(
+                        Modifier.fillMaxWidth()
+                            .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+                            .clip(shape)
+                            .background(Paper)
+                            .border(BorderStroke(1.dp, Brush.verticalGradient(listOf(accent.copy(alpha = 0.6f), Line))), shape)
+                            .padding(vertical = 8.dp),
+                    ) {
+                        AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
+                        Divider(cur, r)
+                        AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
+                    }
+                }
             }
             if (vm.mode == Mode.Convert && (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty())) {
                 Pill("Reiniciar", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
@@ -244,6 +305,12 @@ private fun Screen(vm: RatesViewModel) {
             vm.error?.let {
                 Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
             }
+
+            Text(
+                "cups ${Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)}",
+                color = Hint, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
         }
     }
 
@@ -400,11 +467,11 @@ private fun DateBar(vm: RatesViewModel, ink: Color, onPick: () -> Unit) {
     val sel = vm.selectedDate
     val current = vm.currentDate
     val today = LocalDate.now()
-    val label = when {
-        sel == null -> "Sin tasas"
-        current != null && sel.isAfter(current) -> "Próxima tasa"
-        sel == current && sel == today -> "Tasa de hoy"
-        sel == current -> "Tasa vigente"
+    fun labelFor(s: LocalDate?) = when {
+        s == null -> "Sin tasas"
+        current != null && s.isAfter(current) -> "Próxima tasa"
+        s == current && s == today -> "Tasa de hoy"
+        s == current -> "Tasa vigente"
         else -> "Tasa anterior"
     }
     val newAvailable = vm.nextDate != null && sel == current
@@ -425,12 +492,23 @@ private fun DateBar(vm: RatesViewModel, ink: Color, onPick: () -> Unit) {
             ) {
                 CalendarIcon(ink, Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
-                Column(horizontalAlignment = Alignment.Start) {
-                    Text(label, color = ink, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
-                    Text(
-                        sel?.let { longDate(it) } ?: "—", color = Ink, fontSize = 17.sp,
-                        fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.2).sp,
-                    )
+                AnimatedContent(
+                    targetState = sel, label = "date",
+                    transitionSpec = {
+                        val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
+                        val dir = if (back) -1 else 1
+                        (fadeIn(tween(260, easing = EaseOut)) + slideInHorizontally(tween(280, easing = EaseOut)) { dir * it / 8 })
+                            .togetherWith(fadeOut(tween(100)) + slideOutHorizontally(tween(160, easing = EaseOut)) { -dir * it / 10 })
+                            .using(SizeTransform(clip = false))
+                    },
+                ) { d ->
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(labelFor(d), color = ink, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+                        Text(
+                            d?.let { longDate(it) } ?: "—", color = Ink, fontSize = 17.sp,
+                            fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.2).sp,
+                        )
+                    }
                 }
             }
             NavButton(left = false, enabled = vm.nextDate != null, description = "Tasa del día siguiente", badge = newAvailable, onClick = vm::goNext)
@@ -467,9 +545,13 @@ private fun RateTile(c: Cur, r: Rate?, selected: Boolean, modifier: Modifier, on
     val fill by animateColorAsState(if (selected) accent.copy(alpha = 0.14f) else Surface1, tween(300), label = "fill")
     val stroke by animateColorAsState(if (selected) accent else Line, tween(300), label = "stroke")
     val shape = RoundedCornerShape(22.dp)
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, tween(160, easing = EaseOut), label = "press")
     Column(
-        modifier.clip(shape).background(fill).border(if (selected) 1.5.dp else 1.dp, stroke, shape)
-            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+        modifier.graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(shape).background(fill).border(if (selected) 1.5.dp else 1.dp, stroke, shape)
+            .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -477,15 +559,15 @@ private fun RateTile(c: Cur, r: Rate?, selected: Boolean, modifier: Modifier, on
             Coin(c.symbol, accent, 22)
             Text(c.label, color = if (selected) Ink else Muted, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
         }
-        Text(
-            r?.let { money(it.value) } ?: "—",
-            color = Ink, fontSize = 20.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
-            letterSpacing = (-0.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
-        )
-        Text(
-            r?.let { if (c == Cur.USDT && it.date == LocalDate.now()) "en vivo" else shortDate(it.date) } ?: "sin datos",
-            color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
-        )
+        Tick(r?.let { money(it.value) } ?: "—") { t ->
+            Text(
+                t, color = Ink, fontSize = 20.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
+            )
+        }
+        Tick(r?.let { if (c == Cur.USDT && it.date == LocalDate.now()) "en vivo" else shortDate(it.date) } ?: "sin datos") { t ->
+            Text(t, color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
@@ -657,6 +739,10 @@ private fun CalendarIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
 @Composable
 private fun ChangeCard(c: Cur, ch: Change?, ink: Color) {
     val shape = RoundedCornerShape(20.dp)
+    val d = ch?.diff ?: 0.0
+    val tone by animateColorAsState(
+        if (d > 0.0049) RedInk else if (d < -0.0049) GreenInk else Muted, tween(350, easing = EaseOut), label = "tone",
+    )
     Row(
         Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape)
             .padding(horizontal = 16.dp, vertical = 12.dp).semantics(mergeDescendants = true) {},
@@ -668,37 +754,44 @@ private fun ChangeCard(c: Cur, ch: Change?, ink: Color) {
         }
         val up = ch.diff > 0.0049
         val down = ch.diff < -0.0049
-        val tone = if (up) RedInk else if (down) GreenInk else Muted
         val verb = if (up) "subió" else if (down) "bajó" else "se mantuvo"
         val sign = if (up) "▲ +" else if (down) "▼ −" else "• "
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("${c.label} $verb vs. ${shortDate(ch.since)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
-            Text(
-                "$sign${money(kotlin.math.abs(ch.diff))} Bs", color = tone, fontSize = 20.sp, fontFamily = Manrope,
-                fontWeight = FontWeight.ExtraBold, style = TextStyle(fontFeatureSettings = TNUM),
-            )
+            Tick("${c.label} $verb vs. ${shortDate(ch.since)}") { t ->
+                Text(t, color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+            }
+            Tick("$sign${money(kotlin.math.abs(ch.diff))} Bs") { t ->
+                Text(
+                    t, color = tone, fontSize = 20.sp, fontFamily = Manrope,
+                    fontWeight = FontWeight.ExtraBold, style = TextStyle(fontFeatureSettings = TNUM),
+                )
+            }
         }
-        Text(
+        Tick(
             "${if (up) "+" else if (down) "−" else ""}${String.format(Locale.GERMANY, "%.2f", kotlin.math.abs(ch.pct))}%",
-            color = tone, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
             modifier = Modifier.clip(CircleShape).background(tone.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp),
-        )
+        ) { t -> Text(t, color = tone, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold) }
     }
 }
 
 @Composable
 private fun ModeToggle(mode: Mode, ink: Color, onMode: (Mode) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(4.dp)) {
-        listOf(Mode.Convert to "Convertir", Mode.Calc to "Calculadora").forEach { (m, label) ->
-            val sel = m == mode
-            Box(
-                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
-                    .background(if (sel) Paper else Color.Transparent)
-                    .selectable(selected = sel, role = Role.Tab) { onMode(m) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, color = if (sel) ink else Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+    // La pastilla se desliza entre las dos opciones en vez de saltar
+    val bias by animateFloatAsState(if (mode == Mode.Calc) 1f else -1f, tween(300, easing = EaseMove), label = "modeBias")
+    Box(Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(4.dp)) {
+        Box(Modifier.fillMaxWidth(0.5f).height(44.dp).align(BiasAlignment(bias, 0f)).clip(RoundedCornerShape(12.dp)).background(Paper))
+        Row(Modifier.fillMaxWidth()) {
+            listOf(Mode.Convert to "Convertir", Mode.Calc to "Calculadora").forEach { (m, label) ->
+                val sel = m == mode
+                val textColor by animateColorAsState(if (sel) ink else Muted, tween(250, easing = EaseOut), label = "modeText")
+                Box(
+                    Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                        .selectable(selected = sel, role = Role.Tab) { onMode(m) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = textColor, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -738,11 +831,15 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
                 maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
-            Text(
-                "$toSym ${money(vm.calcConverted ?: 0.0)}", color = toInk, fontSize = 26.sp, fontFamily = Manrope,
-                fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
+            Tick(
+                "$toSym ${money(vm.calcConverted ?: 0.0)}",
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            )
+            ) { t ->
+                Text(
+                    t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
+                    fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
+                )
+            }
         }
         val rows = listOf(
             listOf("C", "⇄", "00", "÷"),

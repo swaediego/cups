@@ -106,7 +106,13 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
 
     init { refresh() }
 
-    fun checkUpdate() {
+    private var lastUpdateCheck = 0L
+
+    /** Busca versión nueva; si [force] es false, no repite la consulta antes de 2 minutos. */
+    fun checkUpdate(force: Boolean = true) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastUpdateCheck < 2 * 60 * 1000) return
+        lastUpdateCheck = now
         viewModelScope.launch {
             val ctx = getApplication<Application>()
             val u = withContext(Dispatchers.IO) { runCatching { Updater.fetchLatest() }.getOrNull() }
