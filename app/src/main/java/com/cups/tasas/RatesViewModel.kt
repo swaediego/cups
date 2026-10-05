@@ -287,8 +287,12 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         recalc()
     }
 
+    /** Monedas disponibles: el USDT solo existe para la tasa vigente de hoy, no en fechas anteriores ni futuras. */
+    val currencies: List<Cur> get() = if (pinned == null) Cur.entries else Cur.entries.filter { it.official }
+
     private fun pin(d: LocalDate?) {
         pinned = if (d == currentDate) null else d
+        if (pinned != null && !currency.official) { currency = Cur.USD; lastEdited = Field.Bs }
         recalc()
     }
 

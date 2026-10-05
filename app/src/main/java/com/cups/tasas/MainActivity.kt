@@ -30,6 +30,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -69,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -113,8 +115,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -278,9 +278,10 @@ private fun Screen(vm: RatesViewModel) {
     var updating by remember { mutableStateOf(false) }
 
     Box(
-        Modifier.fillMaxSize().background(Paper).drawBehind {
-            drawRect(Brush.radialGradient(listOf(accent.copy(alpha = 0.16f), Color.Transparent), Offset(size.width * 0.1f, -40f), size.width))
-            drawRect(Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f))
+        Modifier.fillMaxSize().background(Paper).drawWithCache {
+            val a = Brush.radialGradient(listOf(accent.copy(alpha = 0.16f), Color.Transparent), Offset(size.width * 0.1f, -40f), size.width)
+            val b = Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f)
+            onDrawBehind { drawRect(a); drawRect(b) }
         }
     ) {
         // Se adapta a cualquier pantalla: la interfaz se diseña para 360 x 760 dp y se escala por igual
@@ -311,18 +312,18 @@ private fun Screen(vm: RatesViewModel) {
                     AnimatedContent(
                         targetState = calc, label = "tiles",
                         transitionSpec = {
-                            fadeIn(tween(220, delayMillis = 60, easing = EaseOut))
-                                .togetherWith(fadeOut(tween(120)))
-                                .using(SizeTransform(clip = true) { _, _ -> tween(320, easing = EaseMove) })
+                            fadeIn(tween(200, delayMillis = 50, easing = EaseOut))
+                                .togetherWith(fadeOut(tween(100)))
+                                .using(SizeTransform(clip = false) { _, _ -> snap() })
                         },
                     ) { compact ->
                         if (compact) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
-                                Cur.entries.forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
+                                vm.currencies.forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
                             }
                         } else {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Cur.entries.forEach { c ->
+                                vm.currencies.forEach { c ->
                                     RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
                                 }
                             }
@@ -332,8 +333,8 @@ private fun Screen(vm: RatesViewModel) {
                 // La variación no cabe en la calculadora: se pliega
                 AnimatedVisibility(
                     visible = !calc,
-                    enter = fadeIn(tween(220, easing = EaseOut)) + expandVertically(tween(300, easing = EaseMove)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(300, easing = EaseMove)),
+                    enter = fadeIn(tween(200, easing = EaseOut)),
+                    exit = fadeOut(tween(100)),
                 ) {
                     Column {
                         Spacer(Modifier.height(18.dp))
@@ -355,7 +356,7 @@ private fun Screen(vm: RatesViewModel) {
                         (fadeIn(tween(260, easing = EaseOut)) + slideInVertically(tween(280, easing = EaseOut)) { it / 24 } +
                             scaleIn(tween(280, easing = EaseOut), initialScale = 0.985f))
                             .togetherWith(fadeOut(tween(90)))
-                            .using(SizeTransform(clip = false) { _, _ -> tween(300, easing = EaseMove) })
+                            .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
                     if (m == Mode.Calc) {
