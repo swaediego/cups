@@ -447,10 +447,10 @@ private fun InfoButton() {
                 AnimatedVisibility(
                     visibleState = visible,
                     enter = fadeIn(tween(160, easing = EaseOut)) +
-                        scaleIn(spring(dampingRatio = 0.72f, stiffness = 520f), initialScale = 0.72f, transformOrigin = TransformOrigin(0.9f, 0f)) +
+                        scaleIn(spring(dampingRatio = 0.72f, stiffness = 520f), initialScale = 0.72f, transformOrigin = TransformOrigin(0.88f, 0f)) +
                         slideInVertically(tween(260, easing = EaseOut)) { -it / 10 },
                     exit = fadeOut(tween(120, easing = EaseOut)) +
-                        scaleOut(tween(150, easing = EaseOut), targetScale = 0.9f, transformOrigin = TransformOrigin(0.9f, 0f)),
+                        scaleOut(tween(150, easing = EaseOut), targetScale = 0.9f, transformOrigin = TransformOrigin(0.88f, 0f)),
                 ) { InfoCard() }
             }
         }
@@ -462,7 +462,7 @@ private fun InfoCard() {
     val version = Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)
     val shape = RoundedCornerShape(22.dp)
     Column(
-        Modifier.width(236.dp)
+        Modifier.width(200.dp)
             .shadow(20.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
             .clip(shape).background(Paper).border(1.dp, Line, shape)
             .padding(horizontal = 18.dp, vertical = 16.dp),
@@ -470,10 +470,6 @@ private fun InfoCard() {
     ) {
         Text("cups", color = Ink, fontSize = 22.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
         Text("Versión $version", color = Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Tasas del BCV y USDT", color = Hint, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(top = 6.dp),
-        )
     }
 }
 
