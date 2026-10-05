@@ -287,6 +287,9 @@ private fun CenteredText(size: TextUnit) = TextStyle(
     ),
 )
 
+/** Resorte único del deslizamiento entre apartados (el mismo para todo lo que se mueve). */
+private val SLIDE = spring<IntOffset>(dampingRatio = 0.9f, stiffness = 260f)
+
 private val DESIGN_H = 760.dp
 private val DESIGN_W = 360.dp
 
@@ -331,6 +334,18 @@ private fun Screen(vm: RatesViewModel) {
         val contentH = maxOf(screenH / scale, designH)
         Column(
             Modifier.widthIn(max = 520.dp).fillMaxSize().verticalScroll(rememberScrollState())
+                .pointerInput(calc) {
+                    // Deslizar a la derecha vuelve a Convertir; a la izquierda entra a la Calculadora (desde cualquier parte)
+                    var dx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onHorizontalDrag = { _, d -> dx += d },
+                        onDragEnd = {
+                            val t = 90.dp.toPx()
+                            if (dx > t && calc) vm.onMode(Mode.Convert) else if (dx < -t && !calc) vm.onMode(Mode.Calc)
+                        },
+                    )
+                }
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
                 .height(contentH - 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -360,9 +375,10 @@ private fun Screen(vm: RatesViewModel) {
                         AnimatedContent(
                             targetState = calc, label = "tiles",
                             transitionSpec = {
-                                // Sin mover ni redimensionar nada: el diseño final aparece de una vez y solo se funde
-                                fadeIn(tween(200, delayMillis = 50, easing = EaseOut))
-                                    .togetherWith(fadeOut(tween(90)))
+                                // Mismo deslizamiento que el panel
+                                val dir = if (targetState) 1 else -1
+                                (slideInHorizontally(SLIDE) { dir * it } + fadeIn(tween(220, easing = EaseOut)))
+                                    .togetherWith(slideOutHorizontally(SLIDE) { -dir * it } + fadeOut(tween(260)))
                                     .using(SizeTransform(clip = false) { _, _ -> snap() })
                             },
                         ) { compact ->
@@ -399,35 +415,17 @@ private fun Screen(vm: RatesViewModel) {
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            Reveal(5, Modifier.weight(1f).pointerInput(calc) {
-                // Deslizar a la derecha vuelve a Convertir; a la izquierda entra a la Calculadora
-                var dx = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dx = 0f },
-                    onHorizontalDrag = { _, d -> dx += d },
-                    onDragEnd = {
-                        val t = 90.dp.toPx()
-                        if (dx > t && calc) vm.onMode(Mode.Convert) else if (dx < -t && !calc) vm.onMode(Mode.Calc)
-                    },
-                )
-            }) {
+            Reveal(5, Modifier.weight(1f)) {
                 // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
                 AnimatedContent(
                     targetState = vm.mode, label = "panel",
                     modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
-                        // El panel nuevo sube desde una esquina hasta su sitio (solo capa gráfica: nada se recalcula) y el
-                        // anterior se desvanece enseguida. Hacia la Calculadora sale de la esquina derecha; de vuelta, de la izquierda.
-                        val toCalc = targetState == Mode.Calc
-                        val corner = TransformOrigin(if (toCalc) 1f else 0f, 1f)
-                        // Resorte suave: el movimiento se nota (viaja más y se asienta con un leve rebote) pero sin recalcular el diseño
-                        val soft = spring<Float>(dampingRatio = 0.8f, stiffness = 170f)
-                        val softOff = spring<IntOffset>(dampingRatio = 0.85f, stiffness = 170f)
-                        (fadeIn(tween(300, delayMillis = 30, easing = EaseOut)) +
-                            scaleIn(soft, initialScale = 0.8f, transformOrigin = corner) +
-                            slideInVertically(softOff) { it / 7 } +
-                            slideInHorizontally(softOff) { if (toCalc) it / 5 else -it / 5 })
-                            .togetherWith(fadeOut(tween(160)) + scaleOut(tween(220, easing = EaseOut), targetScale = 0.94f, transformOrigin = corner))
+                        // Un solo movimiento para todo: el panel nuevo entra deslizando de lado y el anterior sale por el otro
+                        // (solo capa gráfica: no se recalcula el diseño). Hacia la Calculadora entra por la derecha.
+                        val dir = if (targetState == Mode.Calc) 1 else -1
+                        (slideInHorizontally(SLIDE) { dir * it } + fadeIn(tween(220, easing = EaseOut)))
+                            .togetherWith(slideOutHorizontally(SLIDE) { -dir * it } + fadeOut(tween(260)))
                             .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
