@@ -5,6 +5,9 @@ package com.cups.tasas
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -318,6 +321,7 @@ private fun Screen(vm: RatesViewModel) {
         CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fs)) {
         Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
         val calc = vm.mode == Mode.Calc
+        BackHandler(enabled = calc) { vm.onMode(Mode.Convert) }
         // La calculadora se reparte en todo el alto (sin deslizar); si ni escalada cabe
         // (pantalla muy baja, p. ej. horizontal), queda el alto de diseño y entonces sí se desliza
         val contentH = maxOf(screenH / scale, designH)
@@ -381,7 +385,11 @@ private fun Screen(vm: RatesViewModel) {
                 }
             }
 
-            Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !calc,
+                enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) + expandVertically(tween(380, easing = EaseMove)),
+                exit = fadeOut(tween(110)) + shrinkVertically(tween(380, easing = EaseMove)),
+            ) { Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) } }
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
@@ -1095,17 +1103,17 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     }
 }
 
-/** Burbuja de una moneda: su círculo con el símbolo y el nombre (con ▾ si abre una lista). */
+/** Moneda como círculo con solo su símbolo (con ▾ al lado si abre una lista). */
 @Composable
 private fun CurPill(sym: String, name: String, color: Color, modifier: Modifier = Modifier, chevron: Boolean = false) {
     Row(
-        modifier.clip(CircleShape).background(color.copy(alpha = 0.16f))
-            .padding(start = 4.dp, end = if (chevron) 8.dp else 12.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier.clip(CircleShape).semantics { contentDescription = name },
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Coin(sym, color, 24)
-        Text(name, color = Ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
-        if (chevron) Text("▾", color = Muted, fontSize = 12.sp)
+        Box(Modifier.size(44.dp).clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Coin(sym, color, 30)
+        }
+        if (chevron) Text("▾", color = Ink, fontSize = 16.sp, modifier = Modifier.padding(start = 2.dp, end = 6.dp))
     }
 }
 
@@ -1113,6 +1121,15 @@ private fun CurPill(sym: String, name: String, color: Color, modifier: Modifier 
  * Franja de monedas de la calculadora (ocupa el lugar de las tarjetas): dos burbujas centradas, Bolívares y la moneda extranjera.
  * Tocar la flecha o Bolívares intercambia el sentido; tocar la moneda extranjera abre la lista para elegir Dólar, Euro o USDT.
  */
+@Composable
+private fun BackArrow(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.09f
+    val p = Path().apply {
+        moveTo(size.width * 0.62f, size.height * 0.2f); lineTo(size.width * 0.28f, size.height * 0.5f); lineTo(size.width * 0.62f, size.height * 0.8f)
+    }
+    drawPath(p, color, style = Stroke(width = w * 1.4f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+}
+
 @Composable
 private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
     val inBs = vm.calcInBs
@@ -1146,7 +1163,13 @@ private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
         CurPill("Bs", "Bolívares", Red, modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Invertir conversión", onClick = vm::toggleCalcSide))
     }
     // margen para que las burbujas no se recorten con el contenedor deslizante
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        // Volver a Convertir: solo la flecha, sin burbuja
+        Box(
+            Modifier.align(Alignment.CenterStart).size(48.dp).clip(CircleShape)
+                .clickable(role = Role.Button, onClickLabel = "Volver a Convertir") { vm.onMode(Mode.Convert) },
+            contentAlignment = Alignment.CenterStart,
+        ) { BackArrow(Ink, Modifier.padding(start = 4.dp).size(26.dp)) }
         Row(
             Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
