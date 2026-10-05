@@ -12,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.CubicBezierEasing
@@ -343,7 +345,10 @@ private fun Screen(vm: RatesViewModel) {
                     transitionSpec = {
                         val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
                         val dir = if (back) -1 else 1
-                        (slideInHorizontally(tween(440, easing = EaseMove)) { dir * it } + fadeIn(tween(260, easing = EaseOut)))
+                        // En la calculadora solo hay símbolos de moneda, que son los mismos en todas las fechas:
+                        // no se desliza nada (los datos cambian en su sitio)
+                        if (calc) EnterTransition.None.togetherWith(ExitTransition.None).using(SizeTransform(clip = false) { _, _ -> snap() })
+                        else (slideInHorizontally(tween(440, easing = EaseMove)) { dir * it } + fadeIn(tween(260, easing = EaseOut)))
                             .togetherWith(slideOutHorizontally(tween(440, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
                             .using(SizeTransform(clip = true) { _, _ -> snap() })
                     },
