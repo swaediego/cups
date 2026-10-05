@@ -127,6 +127,12 @@ object Updater {
         WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("update-check", ExistingPeriodicWorkPolicy.KEEP, req)
     }
 
+    /** Busca una versión nueva y, si la hay, avisa con una notificación (una sola vez por versión). */
+    fun checkAndNotify(ctx: Context) {
+        val u = runCatching { fetchLatest() }.getOrNull() ?: return
+        if (isNewer(u.version, installedVersion(ctx))) notify(ctx, u)
+    }
+
     /** Avisa una sola vez por versión. */
     fun notify(ctx: Context, u: Update) {
         val prefs = ctx.getSharedPreferences("rates", 0)
@@ -143,7 +149,12 @@ object Updater {
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Actualización disponible")
-            .setContentText("cups ${u.version} está listo. Ábrelo y toca el ícono para actualizar.")
+            .setContentText("Actualiza a la versión ${u.version} para obtener mejoras.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "Actualiza a la versión ${u.version} para obtener mejoras." +
+                    (u.notes.trim().takeIf { it.isNotEmpty() }?.let { "\n\n$it" } ?: "") +
+                    "\n\nAbre cups y toca el ícono de actualización.",
+            ))
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
@@ -154,8 +165,7 @@ object Updater {
 
 class UpdateWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
-        val u = runCatching { Updater.fetchLatest() }.getOrNull() ?: return Result.success()
-        if (Updater.isNewer(u.version, Updater.installedVersion(applicationContext))) Updater.notify(applicationContext, u)
+        Updater.checkAndNotify(applicationContext)
         return Result.success()
     }
 }

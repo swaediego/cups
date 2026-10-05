@@ -190,10 +190,11 @@ object RatesSync {
     }
 }
 
-/** USDT (y cualquier tasa nueva del BCV) cada hora. */
+/** USDT (y cualquier tasa nueva del BCV) cada hora; de paso, aviso si hay versión nueva de la app. */
 class RatesWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         RatesSync.syncInBackground(applicationContext)
+        Updater.checkAndNotify(applicationContext)
         return Result.success()
     }
 }
