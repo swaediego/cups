@@ -355,14 +355,14 @@ private fun Screen(vm: RatesViewModel) {
                             .using(SizeTransform(clip = true) { _, _ -> snap() })
                     },
                 ) { d ->
-                    Column(Modifier.animateContentSize(tween(380, easing = EaseMove))) {
+                    Column {
                         // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
                         AnimatedContent(
                             targetState = calc, label = "tiles",
                             transitionSpec = {
-                                val dir = if (targetState) 1 else -1
-                                (slideInHorizontally(tween(420, easing = EaseMove)) { dir * it } + fadeIn(tween(240, easing = EaseOut)))
-                                    .togetherWith(slideOutHorizontally(tween(420, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
+                                // Sin mover ni redimensionar nada: el diseño final aparece de una vez y solo se funde
+                                fadeIn(tween(200, delayMillis = 50, easing = EaseOut))
+                                    .togetherWith(fadeOut(tween(90)))
                                     .using(SizeTransform(clip = false) { _, _ -> snap() })
                             },
                         ) { compact ->
@@ -379,8 +379,8 @@ private fun Screen(vm: RatesViewModel) {
                         // La variación no cabe en la calculadora: se pliega
                         AnimatedVisibility(
                             visible = !calc,
-                            enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)),
-                            exit = fadeOut(tween(110)),
+                            enter = fadeIn(tween(220, delayMillis = 60, easing = EaseOut)),
+                            exit = fadeOut(tween(80)),
                         ) {
                             Column {
                                 Spacer(Modifier.height(18.dp))
@@ -393,8 +393,8 @@ private fun Screen(vm: RatesViewModel) {
 
             androidx.compose.animation.AnimatedVisibility(
                 visible = !calc,
-                enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) + expandVertically(tween(380, easing = EaseMove)),
-                exit = fadeOut(tween(110)) + shrinkVertically(tween(380, easing = EaseMove)),
+                enter = fadeIn(tween(220, delayMillis = 60, easing = EaseOut)),
+                exit = fadeOut(tween(80)),
             ) { Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) } }
 
             val r = vm.rateFor(cur)
@@ -416,10 +416,15 @@ private fun Screen(vm: RatesViewModel) {
                     targetState = vm.mode, label = "panel",
                     modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
-                        // Pasar de página: el panel nuevo entra por un lado y el anterior sale por el otro
-                        val dir = if (targetState == Mode.Calc) 1 else -1
-                        (slideInHorizontally(tween(420, easing = EaseMove)) { dir * it } + fadeIn(tween(240, easing = EaseOut)))
-                            .togetherWith(slideOutHorizontally(tween(420, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
+                        // El panel nuevo sube desde una esquina hasta su sitio (solo capa gráfica: nada se recalcula) y el
+                        // anterior se desvanece enseguida. Hacia la Calculadora sale de la esquina derecha; de vuelta, de la izquierda.
+                        val toCalc = targetState == Mode.Calc
+                        val corner = TransformOrigin(if (toCalc) 1f else 0f, 1f)
+                        (fadeIn(tween(260, delayMillis = 40, easing = EaseOut)) +
+                            scaleIn(tween(420, easing = EaseOut), initialScale = 0.9f, transformOrigin = corner) +
+                            slideInVertically(tween(420, easing = EaseOut)) { it / 14 } +
+                            slideInHorizontally(tween(420, easing = EaseOut)) { if (toCalc) it / 10 else -it / 10 })
+                            .togetherWith(fadeOut(tween(90)))
                             .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
