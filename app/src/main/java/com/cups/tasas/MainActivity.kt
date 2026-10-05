@@ -420,11 +420,14 @@ private fun Screen(vm: RatesViewModel) {
                         // anterior se desvanece enseguida. Hacia la Calculadora sale de la esquina derecha; de vuelta, de la izquierda.
                         val toCalc = targetState == Mode.Calc
                         val corner = TransformOrigin(if (toCalc) 1f else 0f, 1f)
-                        (fadeIn(tween(260, delayMillis = 40, easing = EaseOut)) +
-                            scaleIn(tween(420, easing = EaseOut), initialScale = 0.9f, transformOrigin = corner) +
-                            slideInVertically(tween(420, easing = EaseOut)) { it / 14 } +
-                            slideInHorizontally(tween(420, easing = EaseOut)) { if (toCalc) it / 10 else -it / 10 })
-                            .togetherWith(fadeOut(tween(90)))
+                        // Resorte suave: el movimiento se nota (viaja más y se asienta con un leve rebote) pero sin recalcular el diseño
+                        val soft = spring<Float>(dampingRatio = 0.8f, stiffness = 170f)
+                        val softOff = spring<IntOffset>(dampingRatio = 0.85f, stiffness = 170f)
+                        (fadeIn(tween(300, delayMillis = 30, easing = EaseOut)) +
+                            scaleIn(soft, initialScale = 0.8f, transformOrigin = corner) +
+                            slideInVertically(softOff) { it / 7 } +
+                            slideInHorizontally(softOff) { if (toCalc) it / 5 else -it / 5 })
+                            .togetherWith(fadeOut(tween(160)) + scaleOut(tween(220, easing = EaseOut), targetScale = 0.94f, transformOrigin = corner))
                             .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
