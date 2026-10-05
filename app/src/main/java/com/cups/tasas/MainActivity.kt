@@ -1037,8 +1037,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val toName = if (inBs) cur.label else "Bolívares"
     val fromColor = if (inBs) Red else accentOf(cur)
     val toColor = if (inBs) accentOf(cur) else Red
-    // La operación se muestra con la moneda en cada número ("Bs 200 + Bs 15"); el % no lleva moneda
-    val shown = withCurrency(vm.expr.ifEmpty { "0" }, fromSym)
+    val shown = vm.expr.ifEmpty { "0" }
     // Entrada: el encabezado y cada fila del teclado suben desde abajo en cascada (solo capa gráfica: sin recomponer)
     val enter = remember { Animatable(0f) }
     LaunchedEffect(Unit) { enter.animateTo(1f, tween(760, easing = LinearEasing)) }
@@ -1054,43 +1053,23 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // De qué moneda a cuál: una burbuja por moneda, con su símbolo y su nombre
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CurPill(fromSym, fromName, fromColor)
-                Text("→", color = Muted, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
-                CurPill(toSym, toName, toColor)
-            }
-            Column(Modifier.fillMaxWidth()) {
-                // Monto: a la izquierda el botón de intercambiar (una función de la app, no una tecla de la calculadora)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SwapBubble(inBs, onClick = vm::toggleCalcSide)
+            // De qué moneda a cuál: una burbuja por moneda, centradas; tocarlas intercambia las monedas
+            SwapPills(inBs, fromSym, fromName, fromColor, toSym, toName, toColor, onClick = vm::toggleCalcSide)
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                Text(
+                    shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
+                    fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
+                    maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Tick(
+                    "$toSym ${money(vm.calcConverted ?: 0.0)}",
+                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                ) { t ->
                     Text(
-                        shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
-                        fontSize = when { shown.length > 30 -> 24.sp; shown.length > 22 -> 30.sp; shown.length > 15 -> 40.sp; shown.length > 10 -> 52.sp; else -> 64.sp },
-                        maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
+                        t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
+                        fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
                     )
-                }
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Tasa usada, como etiqueta con el mismo estilo que en Convertir
-                    r?.let {
-                        Text(
-                            "1 ${cur.symbol} = Bs. ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope,
-                            fontWeight = FontWeight.SemiBold, style = TextStyle(fontFeatureSettings = TNUM),
-                            modifier = Modifier.clip(CircleShape).background(Surface1).border(1.dp, Line, CircleShape)
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Tick(
-                        "$toSym ${money(vm.calcConverted ?: 0.0)}",
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    ) { t ->
-                        Text(
-                            t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
-                            fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
-                        )
-                    }
                 }
             }
         }
@@ -1122,24 +1101,6 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     }
 }
 
-/** Pone el símbolo de la moneda delante de cada número de la operación (los seguidos de % no llevan). */
-private fun withCurrency(expr: String, sym: String): String {
-    val sb = StringBuilder()
-    var i = 0
-    while (i < expr.length) {
-        val c = expr[i]
-        if (c.isDigit() || c == ',') {
-            val st = i
-            while (i < expr.length && (expr[i].isDigit() || expr[i] == ',')) i++
-            if (i < expr.length && expr[i] == '%') sb.append(expr, st, i) else sb.append(sym).append('\u00A0').append(expr, st, i)
-        } else {
-            if (c in "+−×÷") sb.append(' ').append(c).append(' ') else sb.append(c)
-            i++
-        }
-    }
-    return sb.toString()
-}
-
 /** Burbuja de una moneda: su círculo con el símbolo y el nombre. */
 @Composable
 private fun CurPill(sym: String, name: String, color: Color) {
@@ -1152,18 +1113,30 @@ private fun CurPill(sym: String, name: String, color: Color) {
     }
 }
 
-/** Botón redondo para invertir la conversión; el icono da media vuelta cada vez. */
+/** Las dos burbujas de moneda, centradas: al tocarlas se intercambian; la flecha da media vuelta y se oyen como un botón. */
 @Composable
-private fun SwapBubble(inBs: Boolean, onClick: () -> Unit) {
+private fun SwapPills(
+    inBs: Boolean, fromSym: String, fromName: String, fromColor: Color, toSym: String, toName: String, toColor: Color, onClick: () -> Unit,
+) {
     val turn by animateFloatAsState(if (inBs) 0f else 180f, tween(360, easing = EaseMove), label = "swap")
-    Box(
-        Modifier.size(44.dp).clip(CircleShape).background(Surface1).border(1.dp, Line, CircleShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = "Invertir conversión" },
-        contentAlignment = Alignment.Center,
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.95f else 1f, tween(160, easing = EaseOut), label = "swapPress")
+    Row(
+        Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
     ) {
-        val fixed = fixedSp(22f)
-        Text("⇄", color = Ink, fontSize = fixed, style = CenteredText(fixed), modifier = Modifier.graphicsLayer { rotationZ = turn })
+        Row(
+            Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape)
+                .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
+                .padding(4.dp)
+                .semantics { contentDescription = "Invertir conversión: de $fromName a $toName" },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CurPill(fromSym, fromName, fromColor)
+            val fixed = fixedSp(18f)
+            Text("⇄", color = Muted, fontSize = fixed, style = CenteredText(fixed), modifier = Modifier.graphicsLayer { rotationZ = turn })
+            CurPill(toSym, toName, toColor)
+        }
     }
 }
 
