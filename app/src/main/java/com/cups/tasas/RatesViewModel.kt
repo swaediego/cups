@@ -22,8 +22,6 @@ enum class Cur(val label: String, val symbol: String, val url: String, val offic
     USDT("USDT", "₮", "https://ve.dolarapi.com/v1/historicos/dolares/paralelo", official = false),
 }
 
-private const val LIVE_URL = "https://ve.dolarapi.com/v1/dolares"
-
 enum class Mode { Convert, Calc }
 
 /** Tasa publicada por el BCV con su fecha valor. */
@@ -96,7 +94,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("rates", 0)
 
     /** Historial completo por moneda, ordenado por fecha ascendente. */
-    var history by mutableStateOf(Cur.entries.associateWith { load(it) })
+    var history by mutableStateOf(RatesSync.loadAll(prefs))
         private set
     var loading by mutableStateOf(false)
         private set
@@ -117,7 +115,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         private set
 
     private var justEvaluated = false
-    private var usdtLive by mutableStateOf(loadLive())
+    private var usdtLive by mutableStateOf(RatesSync.loadLive(prefs))
 
     /** Fecha de tasa elegida por el usuario; null = seguir la tasa vigente de hoy. */
     private var pinned by mutableStateOf<LocalDate?>(null)
@@ -132,7 +130,6 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     var updateMsg by mutableStateOf<String?>(null)
         private set
 
-    init { refresh() }
 
     private var lastUpdateCheck = 0L
 
@@ -217,70 +214,39 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         return Change(diff, diff / prev.value * 100, prev.date)
     }
 
-    private fun loadLive(): Rate? {
-        val p = prefs.getString("usdt_live", null)?.split('=') ?: return null
-        return try { Rate(p[1].toDouble(), LocalDate.parse(p[0])) } catch (x: Exception) { null }
+    private var lastSync = RatesSync.lastSync(prefs)
+
+    /** Vuelve a leer lo guardado (los trabajos en segundo plano pueden haber traído tasas nuevas). */
+    private fun reloadFromPrefs() {
+        history = RatesSync.loadAll(prefs)
+        RatesSync.loadLive(prefs)?.let { usdtLive = it }
+        lastSync = RatesSync.lastSync(prefs)
+        recalc()
     }
 
-    private fun load(c: Cur): List<Rate> {
-        val raw = prefs.getString("hist_${c.name}", null) ?: return emptyList()
-        return raw.split(';').mapNotNull { e ->
-            val p = e.split('=')
-            if (p.size != 2) null else try { Rate(p[1].toDouble(), LocalDate.parse(p[0])) } catch (x: Exception) { null }
-        }.sortedBy { it.date }
+    /** Al volver al frente (y cada pocos minutos abierta): si lo guardado tiene más de 10 min, actualiza en silencio. */
+    fun refreshIfStale() {
+        if (loading) return
+        reloadFromPrefs()
+        if (System.currentTimeMillis() - lastSync > 10 * 60 * 1000) refresh(silent = dates.isNotEmpty())
     }
 
-    fun refresh() {
-        checkUpdate()
+    /** [silent]: sin indicador de carga ni mensaje de error (actualización automática). */
+    fun refresh(silent: Boolean = false) {
+        if (!silent) checkUpdate()
         viewModelScope.launch {
-            loading = true
-            error = null
-            try {
-                val (fetched, live) = withContext(Dispatchers.IO) {
-                    Cur.entries.associateWith { c -> runCatching { fetch(c) }.getOrNull() } to runCatching { fetchLive() }.getOrNull()
-                }
-                if (Cur.entries.filter { it.official }.all { fetched[it] == null }) throw java.io.IOException()
-                val fresh = Cur.entries.associateWith { fetched[it] ?: history[it].orEmpty() }
-                prefs.edit().apply {
-                    fresh.forEach { (c, list) ->
-                        putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}" })
-                    }
-                    live?.let { putString("usdt_live", "${it.date}=${it.value}") }
-                }.apply()
-                history = fresh
-                if (live != null) usdtLive = live
+            if (!silent) { loading = true; error = null }
+            val r = withContext(Dispatchers.IO) { RatesSync.pull(prefs) }
+            if (r != null) {
+                history = r.history
+                if (r.live != null) usdtLive = r.live
+                lastSync = RatesSync.lastSync(prefs)
                 recalc()
-            } catch (e: Exception) {
+            } else if (!silent) {
                 error = if (dates.isEmpty()) "Sin conexión y sin tasas guardadas" else "Sin conexión, usando las tasas guardadas"
             }
             loading = false
         }
-    }
-
-    private fun fetch(c: Cur): List<Rate> {
-        val conn = URL(c.url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 10000
-        conn.readTimeout = 15000
-        val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-        val out = ArrayList<Rate>(arr.length())
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            if (o.isNull("promedio")) continue
-            out += Rate(o.getDouble("promedio"), LocalDate.parse(o.getString("fecha").take(10)))
-        }
-        return out.sortedBy { it.date }
-    }
-
-    private fun fetchLive(): Rate? {
-        val conn = URL(LIVE_URL).openConnection() as HttpURLConnection
-        conn.connectTimeout = 10000
-        conn.readTimeout = 15000
-        val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            if (o.getString("fuente") == "paralelo" && !o.isNull("promedio")) return Rate(o.getDouble("promedio"), LocalDate.now())
-        }
-        return null
     }
 
     private fun parse(s: String) = s.replace(',', '.').toDoubleOrNull()

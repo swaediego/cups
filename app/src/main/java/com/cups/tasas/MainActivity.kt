@@ -55,6 +55,9 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -199,6 +202,16 @@ class MainActivity : ComponentActivity() {
                 .launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         Updater.schedule(applicationContext)
+        RatesSync.schedule(applicationContext)
+        // Tasas al día: al abrir o volver al frente, y cada 5 min mientras la app está a la vista
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    vm.refreshIfStale()
+                    delay(5 * 60 * 1000L)
+                }
+            }
+        }
         setContent {
             val dark = AppTheme.dark
             // Barras del sistema e iconos según el tema, y fondo de ventana para que no parpadee en blanco
