@@ -112,6 +112,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -180,11 +183,11 @@ private fun Tick(text: String, modifier: Modifier = Modifier, content: @Composab
 
 /** Primera carga: cada sección entra subiendo y apareciendo, en escalera (una sola vez). */
 @Composable
-private fun Reveal(index: Int, content: @Composable () -> Unit) {
+private fun Reveal(index: Int, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(index * 45L); shown = true }
     val p by animateFloatAsState(if (shown) 1f else 0f, tween(550, easing = EaseOut), label = "reveal")
-    Box(Modifier.graphicsLayer { alpha = p; translationY = (1f - p) * 14.dp.toPx() }) { content() }
+    Box(modifier.graphicsLayer { alpha = p; translationY = (1f - p) * 14.dp.toPx() }) { content() }
 }
 
 private val SoftShadow get() = if (AppTheme.dark) Color(0x99000000) else Color(0x330B1220)
@@ -272,34 +275,67 @@ private fun Screen(vm: RatesViewModel) {
             drawRect(Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f))
         }
     ) {
+        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+        val calc = vm.mode == Mode.Calc
+        // Alto del contenido: toda la pantalla (la calculadora se reparte en ella sin deslizar);
+        // en pantallas muy bajas o con el teclado abierto, queda un mínimo y entonces sí se desliza
+        val contentH = maxOf(maxHeight, 700.dp)
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
+                .height(contentH - 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Reveal(0) { Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onTheme = vm::toggleTheme) }
 
             Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
 
-            Reveal(2) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Cur.entries.forEach { c ->
-                        RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+            Column {
+                Reveal(2) {
+                    // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
+                    AnimatedContent(
+                        targetState = calc, label = "tiles",
+                        transitionSpec = {
+                            fadeIn(tween(220, delayMillis = 60, easing = EaseOut))
+                                .togetherWith(fadeOut(tween(120)))
+                                .using(SizeTransform(clip = true) { _, _ -> tween(320, easing = EaseMove) })
+                        },
+                    ) { compact ->
+                        if (compact) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                                Cur.entries.forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
+                            }
+                        } else {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Cur.entries.forEach { c ->
+                                    RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+                                }
+                            }
+                        }
+                    }
+                }
+                // La variación no cabe en la calculadora: se pliega
+                AnimatedVisibility(
+                    visible = !calc,
+                    enter = fadeIn(tween(220, easing = EaseOut)) + expandVertically(tween(300, easing = EaseMove)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(300, easing = EaseMove)),
+                ) {
+                    Column {
+                        Spacer(Modifier.height(18.dp))
+                        Reveal(3) { ChangeCard(cur, vm.changeFor(cur), ink) }
                     }
                 }
             }
-
-            Reveal(3) { ChangeCard(cur, vm.changeFor(cur), ink) }
 
             Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) }
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            Reveal(5) {
+            Reveal(5, if (calc) Modifier.weight(1f) else Modifier) {
                 // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
                 AnimatedContent(
                     targetState = vm.mode, label = "panel",
+                    modifier = if (calc) Modifier.fillMaxSize() else Modifier,
                     transitionSpec = {
                         (fadeIn(tween(260, easing = EaseOut)) + slideInVertically(tween(280, easing = EaseOut)) { it / 24 } +
                             scaleIn(tween(280, easing = EaseOut), initialScale = 0.985f))
@@ -308,7 +344,7 @@ private fun Screen(vm: RatesViewModel) {
                     },
                 ) { m ->
                     if (m == Mode.Calc) {
-                        CalcCard(vm, cur, r, accent, ink)
+                        CalcCard(vm, cur, r, accent, ink, Modifier.fillMaxSize())
                     } else Column(
                         Modifier.fillMaxWidth()
                             .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
@@ -330,6 +366,7 @@ private fun Screen(vm: RatesViewModel) {
             vm.error?.let {
                 Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
             }
+        }
         }
     }
 
@@ -659,6 +696,24 @@ private fun RateTile(c: Cur, r: Rate?, selected: Boolean, modifier: Modifier, on
     }
 }
 
+/** Moneda en la calculadora: burbuja con el símbolo; la elegida se resalta con el color de su moneda. */
+@Composable
+private fun CurBubble(c: Cur, selected: Boolean, onClick: () -> Unit) {
+    val accent = accentOf(c)
+    val fill by animateColorAsState(if (selected) accent.copy(alpha = 0.18f) else Surface1, tween(300), label = "bfill")
+    val stroke by animateColorAsState(if (selected) accent else Line, tween(300), label = "bstroke")
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.92f else if (selected) 1.06f else 1f, tween(180, easing = EaseOut), label = "bpress")
+    Box(
+        Modifier.size(46.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape).background(fill).border(if (selected) 1.5.dp else 1.dp, stroke, CircleShape)
+            .selectable(selected = selected, interactionSource = press, indication = LocalIndication.current, role = Role.Tab, onClick = onClick)
+            .semantics { contentDescription = c.label },
+        contentAlignment = Alignment.Center,
+    ) { Coin(c.symbol, accent, 26) }
+}
+
 @Composable
 private fun Coin(label: String, color: Color, size: Int) {
     Box(
@@ -895,52 +950,61 @@ private fun Pill(text: String, ink: Color, modifier: Modifier = Modifier, onClic
 }
 
 @Composable
-private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink: Color) {
+private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink: Color, modifier: Modifier = Modifier) {
     val inBs = vm.calcInBs
     val fromSym = if (inBs) "Bs" else cur.symbol
     val toSym = if (inBs) cur.symbol else "Bs"
     val toInk = if (inBs) ink else Muted
     val shown = vm.expr.ifEmpty { "0" }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalAlignment = Alignment.End) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "$fromSym → $toSym", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-                Spacer(Modifier.weight(1f))
-                r?.let {
-                    Text("1 ${cur.symbol} = ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+    // El teclado reparte el alto que sobra; el monto y el resultado ocupan el resto
+    BoxWithConstraints(modifier) {
+        val keyH = ((maxHeight - 150.dp - 10.dp - 8.dp * 5) / 6).coerceIn(36.dp, 62.dp)
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "$fromSym → $toSym", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    r?.let {
+                        Text("1 ${cur.symbol} = ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
+                        fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
+                        maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Tick(
+                        "$toSym ${money(vm.calcConverted ?: 0.0)}",
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    ) { t ->
+                        Text(
+                            t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
+                            fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
+                        )
+                    }
                 }
             }
-            Text(
-                shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
-                fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
-                maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            val rows = listOf(
+                listOf("C", "⇄", "⌫", "÷"),
+                listOf("(", ")", "%", "×"),
+                listOf("7", "8", "9", "−"),
+                listOf("4", "5", "6", "+"),
+                listOf("1", "2", "3", "="),
+                listOf("0", "00", ","),
             )
-            Tick(
-                "$toSym ${money(vm.calcConverted ?: 0.0)}",
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-            ) { t ->
-                Text(
-                    t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
-                    fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
-                )
-            }
-        }
-        val rows = listOf(
-            listOf("C", "⇄", "⌫", "÷"),
-            listOf("(", ")", "%", "×"),
-            listOf("7", "8", "9", "−"),
-            listOf("4", "5", "6", "+"),
-            listOf("1", "2", "3", "="),
-            listOf("0", "00", ","),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            rows.forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 2f else 1f), vm) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                rows.forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 2f else 1f).height(keyH), vm) }
+                    }
                 }
             }
         }
@@ -966,7 +1030,7 @@ private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm
         else -> Ink
     }
     Box(
-        modifier.height(52.dp).clip(CircleShape).background(bg)
+        modifier.clip(CircleShape).background(bg)
             .combinedClickable(
                 role = Role.Button,
                 onClick = { if (k == "⇄") vm.toggleCalcSide() else vm.key(k) },
