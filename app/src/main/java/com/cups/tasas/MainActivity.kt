@@ -1103,18 +1103,22 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     }
 }
 
-/** Moneda como círculo con solo su símbolo (con ▾ al lado si abre una lista). */
+/** Moneda como círculo con solo su símbolo; si abre una lista lleva un ▾ superpuesto en la esquina (sin ocupar ancho). */
 @Composable
 private fun CurPill(sym: String, name: String, color: Color, modifier: Modifier = Modifier, chevron: Boolean = false) {
-    Row(
-        modifier.clip(CircleShape).semantics { contentDescription = name },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(44.dp).clip(CircleShape).background(color.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-            Coin(sym, color, 30)
-        }
-        if (chevron) Text("▾", color = Ink, fontSize = 16.sp, modifier = Modifier.padding(start = 2.dp, end = 6.dp))
+    Box(modifier.size(44.dp).clip(CircleShape).background(color.copy(alpha = 0.18f)).semantics { contentDescription = name }, contentAlignment = Alignment.Center) {
+        Coin(sym, color, 30)
+        if (chevron) Box(
+            Modifier.align(Alignment.BottomEnd).padding(end = 1.dp, bottom = 1.dp).size(15.dp).clip(CircleShape).background(Paper),
+            contentAlignment = Alignment.Center,
+        ) { SmallChevron(Ink, Modifier.size(9.dp)) }
     }
+}
+
+@Composable
+private fun SmallChevron(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val p = Path().apply { moveTo(size.width * 0.1f, size.height * 0.3f); lineTo(size.width * 0.5f, size.height * 0.75f); lineTo(size.width * 0.9f, size.height * 0.3f) }
+    drawPath(p, color, style = Stroke(width = size.width * 0.2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
 /**
@@ -1169,7 +1173,7 @@ private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
             Modifier.align(Alignment.CenterStart).size(48.dp).clip(CircleShape)
                 .clickable(role = Role.Button, onClickLabel = "Volver a Convertir") { vm.onMode(Mode.Convert) },
             contentAlignment = Alignment.CenterStart,
-        ) { BackArrow(Ink, Modifier.padding(start = 4.dp).size(26.dp)) }
+        ) { BackArrow(Ink, Modifier.padding(start = 6.dp).size(20.dp)) }
         Row(
             Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
