@@ -131,6 +131,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -398,7 +400,18 @@ private fun Screen(vm: RatesViewModel) {
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            Reveal(5, Modifier.weight(1f)) {
+            Reveal(5, Modifier.weight(1f).pointerInput(calc) {
+                // Deslizar a la derecha vuelve a Convertir; a la izquierda entra a la Calculadora
+                var dx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dx = 0f },
+                    onHorizontalDrag = { _, d -> dx += d },
+                    onDragEnd = {
+                        val t = 90.dp.toPx()
+                        if (dx > t && calc) vm.onMode(Mode.Convert) else if (dx < -t && !calc) vm.onMode(Mode.Calc)
+                    },
+                )
+            }) {
                 // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
                 AnimatedContent(
                     targetState = vm.mode, label = "panel",
@@ -1061,7 +1074,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Spacer(Modifier.height(1.dp))
+            PageDots(onBack = { vm.onMode(Mode.Convert) }, ink = ink)
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                 Text(
                     shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
@@ -1130,13 +1143,20 @@ private fun SmallChevron(color: Color, modifier: Modifier) = Canvas(modifier) {
  * Franja de monedas de la calculadora (ocupa el lugar de las tarjetas): dos burbujas centradas, Bolívares y la moneda extranjera.
  * Tocar la flecha o Bolívares intercambia el sentido; tocar la moneda extranjera abre la lista para elegir Dólar, Euro o USDT.
  */
+/** Indicador de página: dos puntos (Convertir, Calculadora). Dice que hay otra página al lado; tocar el primero vuelve. */
 @Composable
-private fun BackArrow(color: Color, modifier: Modifier) = Canvas(modifier) {
-    val w = size.width * 0.09f
-    val p = Path().apply {
-        moveTo(size.width * 0.62f, size.height * 0.2f); lineTo(size.width * 0.28f, size.height * 0.5f); lineTo(size.width * 0.62f, size.height * 0.8f)
+private fun PageDots(onBack: () -> Unit, ink: Color) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        // dos casillas iguales, cada punto centrado en la suya: el conjunto queda simétrico respecto al centro
+        Box(
+            Modifier.size(width = 32.dp, height = 28.dp).clip(CircleShape)
+                .clickable(role = Role.Button, onClickLabel = "Volver a Convertir", onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) { Box(Modifier.size(7.dp).clip(CircleShape).background(Muted.copy(alpha = 0.4f))) }
+        Box(Modifier.size(width = 32.dp, height = 28.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(width = 22.dp, height = 7.dp).clip(CircleShape).background(ink))
+        }
     }
-    drawPath(p, color, style = Stroke(width = w * 1.4f, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }
 
 @Composable
@@ -1173,12 +1193,6 @@ private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
     }
     // margen para que las burbujas no se recorten con el contenedor deslizante
     Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
-        // Volver a Convertir: solo la flecha, sin burbuja
-        Box(
-            Modifier.align(Alignment.CenterStart).size(48.dp).clip(CircleShape)
-                .clickable(role = Role.Button, onClickLabel = "Volver a Convertir") { vm.onMode(Mode.Convert) },
-            contentAlignment = Alignment.CenterStart,
-        ) { BackArrow(Ink, Modifier.padding(start = 6.dp).size(20.dp)) }
         Row(
             Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
