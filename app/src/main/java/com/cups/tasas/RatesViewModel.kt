@@ -32,34 +32,62 @@ data class Rate(val value: Double, val date: LocalDate)
 /** Variación de una tasa respecto a la publicación anterior. */
 data class Change(val diff: Double, val pct: Double, val since: LocalDate)
 
-/** Evalúa una expresión con + − × ÷ (con precedencia). Ignora un operador final. */
+/**
+ * Evalúa una expresión con + − × ÷, paréntesis y % (con precedencia).
+ * Ignora operadores finales y cierra los paréntesis que falten.
+ * "%" divide entre 100; tras + o − (ej. 200+10%) es ese porcentaje del valor de la izquierda.
+ */
 fun evalExpr(src: String): Double? {
-    val s = src.trimEnd { it in "+−×÷" }
+    var s = src.trimEnd { it in "+−×÷(" }
     if (s.isEmpty()) return null
-    val nums = ArrayList<Double>()
-    val ops = ArrayList<Char>()
+    s += ")".repeat(s.count { it == '(' } - s.count { it == ')' })
     var i = 0
-    while (i < s.length) {
-        val neg = s[i] == '−'
-        if (neg) i++
+    var pct = false // el último término fue un número/grupo seguido de %
+
+    fun number(): Double? {
         val st = i
         while (i < s.length && (s[i].isDigit() || s[i] == ',')) i++
-        val n = s.substring(st, i).replace(',', '.').toDoubleOrNull() ?: return null
-        nums += if (neg) -n else n
-        if (i < s.length) ops += s[i++]
+        return s.substring(st, i).replace(',', '.').toDoubleOrNull()
     }
-    var k = 0
-    while (k < ops.size) {
-        if (ops[k] == '×' || ops[k] == '÷') {
-            val v = if (ops[k] == '×') nums[k] * nums[k + 1] else nums[k] / nums[k + 1]
-            nums[k] = v
-            nums.removeAt(k + 1)
-            ops.removeAt(k)
-        } else k++
+    lateinit var expr: () -> Double?
+    fun factor(): Double? {
+        if (i < s.length && s[i] == '−') { i++; return factor()?.let { -it } }
+        var v = if (i < s.length && s[i] == '(') {
+            i++
+            val inner = expr() ?: return null
+            if (i >= s.length || s[i] != ')') return null
+            i++
+            inner
+        } else number() ?: return null
+        pct = false
+        while (i < s.length && s[i] == '%') { i++; v /= 100; pct = true }
+        return v
     }
-    var acc = nums[0]
-    for (j in ops.indices) acc = if (ops[j] == '+') acc + nums[j + 1] else acc - nums[j + 1]
-    return acc.takeIf { it.isFinite() }
+    fun term(): Double? {
+        var v = factor() ?: return null
+        var single = pct
+        while (i < s.length && (s[i] in "×÷(")) {
+            val op = if (s[i] == '(') '×' else s[i++]
+            val r = factor() ?: return null
+            v = if (op == '×') v * r else v / r
+            single = false
+        }
+        pct = single
+        return v
+    }
+    expr = fun(): Double? {
+        var acc = term() ?: return null
+        while (i < s.length && s[i] in "+−") {
+            val op = s[i++]
+            val r = term() ?: return null
+            val d = if (pct) acc * r else r
+            acc = if (op == '+') acc + d else acc - d
+        }
+        pct = false
+        return acc
+    }
+    val v = expr() ?: return null
+    return if (i == s.length) v.takeIf { it.isFinite() } else null
 }
 
 private enum class Field { Foreign, Bs }
@@ -334,20 +362,46 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
             "+", "−", "×", "÷" -> {
                 if (expr.isEmpty()) { if (k == "−") expr = k; return }
                 justEvaluated = false
-                expr = if (expr.last() in "+−×÷") { if (expr.length == 1) expr else expr.dropLast(1) + k } else expr + k
+                val last = expr.last()
+                expr = when {
+                    last == '(' -> if (k == "−") expr + k else expr
+                    last in "+−×÷" ->
+                        if (expr.length == 1 || expr[expr.length - 2] == '(') expr else expr.dropLast(1) + k
+                    else -> expr + k
+                }
+            }
+            "(" -> {
+                if (justEvaluated) { expr = ""; justEvaluated = false }
+                if (expr.length >= 40) return
+                expr += if (expr.isNotEmpty() && (expr.last().isDigit() || expr.last() == ',' || expr.last() in ")%")) "×(" else "("
+            }
+            ")" -> {
+                val open = expr.count { it == '(' } - expr.count { it == ')' }
+                if (open > 0 && expr.isNotEmpty() && (expr.last().isDigit() || expr.last() in ")%") && expr.length < 40) {
+                    justEvaluated = false
+                    expr += ")"
+                }
+            }
+            "%" -> if (expr.isNotEmpty() && (expr.last().isDigit() || expr.last() == ')') && expr.length < 40) {
+                justEvaluated = false
+                expr += "%"
             }
             "," -> {
                 if (justEvaluated) { expr = ""; justEvaluated = false }
                 val n = lastNumber()
                 if (',' in n || expr.length >= 40) return
-                expr += if (n.isEmpty()) "0," else ","
+                expr += if (n.isNotEmpty()) "," else if (expr.isNotEmpty() && expr.last() in ")%") "×0," else "0,"
             }
             else -> { // dígitos y "00"
                 if (justEvaluated) { expr = ""; justEvaluated = false }
                 if (expr.length + k.length > 40) return
                 val n = lastNumber()
                 if (n == "0" && k.all { it == '0' }) return
-                expr = if (n == "0") expr.dropLast(1) + k.trimStart('0').ifEmpty { "0" } else expr + k
+                expr = when {
+                    n == "0" -> expr.dropLast(1) + k.trimStart('0').ifEmpty { "0" }
+                    expr.isNotEmpty() && expr.last() in ")%" -> expr + "×" + k
+                    else -> expr + k
+                }
             }
         }
     }

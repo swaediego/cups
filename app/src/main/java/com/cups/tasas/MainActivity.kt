@@ -842,16 +842,17 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             }
         }
         val rows = listOf(
-            listOf("C", "⇄", "00", "÷"),
-            listOf("7", "8", "9", "×"),
-            listOf("4", "5", "6", "−"),
-            listOf("1", "2", "3", "+"),
-            listOf("0", ",", "⌫", "="),
+            listOf("C", "⇄", "⌫", "÷"),
+            listOf("(", ")", "%", "×"),
+            listOf("7", "8", "9", "−"),
+            listOf("4", "5", "6", "+"),
+            listOf("1", "2", "3", "="),
+            listOf("0", "00", ","),
         )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rows.forEach { row ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(1f), vm) }
+                    row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 2f else 1f), vm) }
                 }
             }
         }
@@ -863,20 +864,21 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
 private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm: RatesViewModel) {
     val haptic = LocalHapticFeedback.current
     val isOp = k in listOf("÷", "×", "−", "+")
+    val isGroup = k in listOf("(", ")", "%")
     val bg = when {
         k == "=" -> ink
         k == "C" -> accent.copy(alpha = 0.28f)
-        isOp || k == "⇄" -> Blue.copy(alpha = 0.12f)
+        isOp || isGroup || k == "⇄" -> Blue.copy(alpha = 0.12f)
         k == "⌫" -> Line
         else -> Surface1
     }
     val fg = when {
         k == "=" -> Paper
-        k == "C" || isOp || k == "⇄" -> ink
+        k == "C" || isOp || isGroup || k == "⇄" -> ink
         else -> Ink
     }
     Box(
-        modifier.height(64.dp).clip(CircleShape).background(bg)
+        modifier.height(52.dp).clip(CircleShape).background(bg)
             .combinedClickable(
                 role = Role.Button,
                 onClick = { if (k == "⇄") vm.toggleCalcSide() else vm.key(k) },
@@ -888,6 +890,9 @@ private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm
                     "C" -> "Borrar todo"
                     "⌫" -> "Borrar un dígito, mantener para borrar todo"
                     "⇄" -> "Invertir conversión"
+                    "%" -> "Porcentaje"
+                    "(" -> "Abrir paréntesis"
+                    ")" -> "Cerrar paréntesis"
                     else -> k
                 }
             },
