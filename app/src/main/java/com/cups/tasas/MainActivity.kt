@@ -119,6 +119,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -306,14 +309,16 @@ private fun Screen(vm: RatesViewModel) {
 
             Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
 
-            Column {
+            Column(Modifier.animateContentSize(tween(380, easing = EaseMove))) {
                 Reveal(2) {
                     // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
                     AnimatedContent(
                         targetState = calc, label = "tiles",
                         transitionSpec = {
-                            fadeIn(tween(200, delayMillis = 50, easing = EaseOut))
-                                .togetherWith(fadeOut(tween(100)))
+                            (fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) +
+                                slideInVertically(tween(380, easing = EaseOut)) { it / 3 } +
+                                scaleIn(tween(380, easing = EaseOut), initialScale = 0.9f))
+                                .togetherWith(fadeOut(tween(110)))
                                 .using(SizeTransform(clip = false) { _, _ -> snap() })
                         },
                     ) { compact ->
@@ -333,8 +338,8 @@ private fun Screen(vm: RatesViewModel) {
                 // La variación no cabe en la calculadora: se pliega
                 AnimatedVisibility(
                     visible = !calc,
-                    enter = fadeIn(tween(200, easing = EaseOut)),
-                    exit = fadeOut(tween(100)),
+                    enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)),
+                    exit = fadeOut(tween(110)),
                 ) {
                     Column {
                         Spacer(Modifier.height(18.dp))
@@ -347,36 +352,40 @@ private fun Screen(vm: RatesViewModel) {
 
             val r = vm.rateFor(cur)
             val shape = RoundedCornerShape(28.dp)
-            Reveal(5, if (calc) Modifier.weight(1f) else Modifier) {
+            Reveal(5, Modifier.weight(1f)) {
                 // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
                 AnimatedContent(
                     targetState = vm.mode, label = "panel",
-                    modifier = if (calc) Modifier.fillMaxSize() else Modifier,
+                    modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
-                        (fadeIn(tween(260, easing = EaseOut)) + slideInVertically(tween(280, easing = EaseOut)) { it / 24 } +
-                            scaleIn(tween(280, easing = EaseOut), initialScale = 0.985f))
-                            .togetherWith(fadeOut(tween(90)))
+                        // El panel nuevo sube desde abajo mientras aparece; el anterior se desvanece enseguida
+                        val toCalc = targetState == Mode.Calc
+                        (fadeIn(tween(300, delayMillis = 60, easing = EaseOut)) +
+                            slideInVertically(tween(440, easing = EaseOut)) { if (toCalc) it / 5 else it / 10 })
+                            .togetherWith(fadeOut(tween(110)))
                             .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
                     if (m == Mode.Calc) {
                         CalcCard(vm, cur, r, accent, ink, Modifier.fillMaxSize())
-                    } else Column(
-                        Modifier.fillMaxWidth()
-                            .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
-                            .clip(shape)
-                            .background(Paper)
-                            .border(BorderStroke(1.dp, Brush.verticalGradient(listOf(accent.copy(alpha = 0.6f), Line))), shape)
-                            .padding(vertical = 8.dp),
-                    ) {
-                        AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
-                        Divider(cur, r)
-                        AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
+                    } else Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+                                .clip(shape)
+                                .background(Paper)
+                                .border(BorderStroke(1.dp, Brush.verticalGradient(listOf(accent.copy(alpha = 0.6f), Line))), shape)
+                                .padding(vertical = 8.dp),
+                        ) {
+                            AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
+                            Divider(cur, r)
+                            AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
+                        }
+                        if (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty()) {
+                            Pill("Reiniciar", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
+                        }
                     }
                 }
-            }
-            if (vm.mode == Mode.Convert && (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty())) {
-                Pill("Reiniciar", ink, Modifier.align(Alignment.CenterHorizontally)) { vm.clearAmounts() }
             }
 
             vm.error?.let {
@@ -974,55 +983,70 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val toSym = if (inBs) cur.symbol else "Bs"
     val toInk = if (inBs) ink else Muted
     val shown = vm.expr.ifEmpty { "0" }
-    // El teclado reparte el alto que sobra; el monto y el resultado ocupan el resto
-    BoxWithConstraints(modifier) {
-        val keyH = ((maxHeight - 150.dp - 10.dp - 8.dp * 5) / 6).coerceIn(34.dp, 72.dp)
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(
-                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp),
-                horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "$fromSym → $toSym", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    Spacer(Modifier.weight(1f))
-                    r?.let {
-                        Text("1 ${cur.symbol} = ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
-                        fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
-                        maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Tick(
-                        "$toSym ${money(vm.calcConverted ?: 0.0)}",
-                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                    ) { t ->
-                        Text(
-                            t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
-                            fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
-                        )
-                    }
+    // Entrada: el encabezado y cada fila del teclado suben desde abajo en cascada (solo capa gráfica: sin recomponer)
+    val enter = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { enter.animateTo(1f, tween(760, easing = LinearEasing)) }
+    fun Modifier.rise(i: Int) = graphicsLayer {
+        val t = ((enter.value * 760f - 70f - i * 45f) / 380f).coerceIn(0f, 1f)
+        val e = EaseOut.transform(t)
+        alpha = e
+        translationY = (1f - e) * 56.dp.toPx()
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
+            horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "$fromSym → $toSym", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.16f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                r?.let {
+                    Text("1 ${cur.symbol} = ${money(it.value)}", color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
                 }
             }
-            val rows = listOf(
-                listOf("C", "⇄", "⌫", "÷"),
-                listOf("(", ")", "%", "×"),
-                listOf("7", "8", "9", "−"),
-                listOf("4", "5", "6", "+"),
-                listOf("1", "2", "3", "="),
-                listOf("0", ","),
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                rows.forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 3f else 1f).height(keyH), vm) }
-                    }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
+                    fontSize = when { shown.length > 20 -> 30.sp; shown.length > 13 -> 40.sp; shown.length > 8 -> 52.sp; else -> 64.sp },
+                    maxLines = 2, letterSpacing = (-1.5).sp, style = TextStyle(fontFeatureSettings = TNUM),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Tick(
+                    "$toSym ${money(vm.calcConverted ?: 0.0)}",
+                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                ) { t ->
+                    Text(
+                        t, color = toInk, fontSize = 26.sp, fontFamily = Manrope,
+                        fontWeight = FontWeight.ExtraBold, maxLines = 1, style = TextStyle(fontFeatureSettings = TNUM),
+                    )
+                }
+            }
+        }
+        val rows = listOf(
+            listOf("C", "⇄", "⌫", "÷"),
+            listOf("(", ")", "%", "×"),
+            listOf("7", "8", "9", "−"),
+            listOf("4", "5", "6", "+"),
+            listOf("1", "2", "3", "="),
+            listOf("0", ","),
+        )
+        // El teclado ocupa lo que queda (menos 150 dp para el monto), entre 34 y 72 dp por tecla
+        Column(
+            Modifier.layout { m, c ->
+                val minH = (6 * 34 + 5 * 8).dp.roundToPx()
+                val maxH = (6 * 72 + 5 * 8).dp.roundToPx()
+                val h = (c.maxHeight - 160.dp.roundToPx()).coerceAtLeast(minH).coerceAtMost(maxH)
+                val p = m.measure(c.copy(minHeight = h, maxHeight = h))
+                layout(p.width, h) { p.place(0, 0) }
+            },
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rows.forEachIndexed { i, row ->
+                Row(Modifier.fillMaxWidth().weight(1f).rise(i + 1), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 3f else 1f).fillMaxHeight(), vm) }
                 }
             }
         }
