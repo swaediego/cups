@@ -115,6 +115,10 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -254,6 +258,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Medidas de diseño (dp): la interfaz se escala a partir de ellas para ajustarse a cada pantalla. */
+private val DESIGN_H = 760.dp
+private val DESIGN_W = 360.dp
+
 private fun money(v: Double) = String.format(Locale.GERMANY, "%,.2f", v)
 
 private val esVE = Locale("es", "VE")
@@ -275,13 +283,20 @@ private fun Screen(vm: RatesViewModel) {
             drawRect(Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f))
         }
     ) {
-        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+        // Se adapta a cualquier pantalla: la interfaz se diseña para 360 x 760 dp y se escala por igual
+        // (tamaños y letras) según el alto y el ancho reales disponibles. No cambia con el teclado abierto.
+        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        val scale = minOf(maxHeight / DESIGN_H, maxWidth / DESIGN_W).coerceIn(0.62f, 1f)
+        val screenH = maxHeight
+        val base = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(base.density * scale, base.fontScale)) {
+        Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
         val calc = vm.mode == Mode.Calc
-        // Alto del contenido: toda la pantalla (la calculadora se reparte en ella sin deslizar);
-        // en pantallas muy bajas o con el teclado abierto, queda un mínimo y entonces sí se desliza
-        val contentH = maxOf(maxHeight, 700.dp)
+        // La calculadora se reparte en todo el alto (sin deslizar); si ni escalada cabe
+        // (pantalla muy baja, p. ej. horizontal), queda el alto de diseño y entonces sí se desliza
+        val contentH = maxOf(screenH / scale, DESIGN_H)
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            Modifier.widthIn(max = 520.dp).fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
                 .height(contentH - 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -366,6 +381,8 @@ private fun Screen(vm: RatesViewModel) {
             vm.error?.let {
                 Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
             }
+        }
+        }
         }
         }
     }
@@ -958,7 +975,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val shown = vm.expr.ifEmpty { "0" }
     // El teclado reparte el alto que sobra; el monto y el resultado ocupan el resto
     BoxWithConstraints(modifier) {
-        val keyH = ((maxHeight - 150.dp - 10.dp - 8.dp * 5) / 6).coerceIn(36.dp, 62.dp)
+        val keyH = ((maxHeight - 150.dp - 10.dp - 8.dp * 5) / 6).coerceIn(34.dp, 72.dp)
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp),
