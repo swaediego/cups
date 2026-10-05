@@ -100,6 +100,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -318,12 +330,6 @@ private fun Screen(vm: RatesViewModel) {
             vm.error?.let {
                 Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
             }
-
-            Text(
-                "cups ${Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)}",
-                color = Hint, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
         }
     }
 
@@ -381,6 +387,8 @@ private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, 
             }
             Spacer(Modifier.width(10.dp))
         }
+        InfoButton()
+        Spacer(Modifier.width(10.dp))
         Box(
             Modifier.size(48.dp).clip(CircleShape).background(Surface1)
                 .border(1.dp, Line, CircleShape)
@@ -404,6 +412,77 @@ private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, 
             RefreshIcon(Ink, Modifier.size(20.dp).rotate(if (loading) spin.value else 0f))
         }
     }
+}
+
+/** Botón "i": abre una tarjeta flotante con la versión; se cierra al tocar fuera. */
+@Composable
+private fun InfoButton() {
+    var open by remember { mutableStateOf(false) }
+    // El popup vive mientras dure la animación de salida
+    val visible = remember { MutableTransitionState(false) }
+    visible.targetState = open
+    val press by animateFloatAsState(if (open) 1f else 0f, tween(260, easing = EaseOut), label = "infoPress")
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(Surface1)
+            .border(1.dp, Line, CircleShape)
+            .clickable(role = Role.Button) { open = !open }
+            .semantics { contentDescription = "Información de la app" },
+        contentAlignment = Alignment.Center,
+    ) {
+        InfoIcon(Ink, Modifier.size(22.dp).graphicsLayer { scaleX = 1f - 0.12f * press; scaleY = 1f - 0.12f * press })
+        if (visible.currentState || visible.targetState) {
+            val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.roundToPx() }
+            val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.roundToPx() }
+            Popup(
+                popupPositionProvider = object : PopupPositionProvider {
+                    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize) =
+                        IntOffset(
+                            (anchorBounds.right - popupContentSize.width).coerceIn(edge, maxOf(edge, windowSize.width - popupContentSize.width - edge)),
+                            anchorBounds.bottom + gap,
+                        )
+                },
+                onDismissRequest = { open = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                AnimatedVisibility(
+                    visibleState = visible,
+                    enter = fadeIn(tween(160, easing = EaseOut)) +
+                        scaleIn(spring(dampingRatio = 0.72f, stiffness = 520f), initialScale = 0.72f, transformOrigin = TransformOrigin(0.9f, 0f)) +
+                        slideInVertically(tween(260, easing = EaseOut)) { -it / 10 },
+                    exit = fadeOut(tween(120, easing = EaseOut)) +
+                        scaleOut(tween(150, easing = EaseOut), targetScale = 0.9f, transformOrigin = TransformOrigin(0.9f, 0f)),
+                ) { InfoCard() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoCard() {
+    val version = Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        Modifier.width(236.dp)
+            .shadow(20.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+            .clip(shape).background(Paper).border(1.dp, Line, shape)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("cups", color = Ink, fontSize = 22.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
+        Text("Versión $version", color = Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Tasas del BCV y USDT", color = Hint, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun InfoIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.09f
+    drawCircle(color, radius = size.width * 0.42f, center = center, style = Stroke(width = w))
+    drawCircle(color, radius = w * 0.75f, center = Offset(center.x, size.height * 0.31f))
+    drawLine(color, Offset(center.x, size.height * 0.45f), Offset(center.x, size.height * 0.70f), w, StrokeCap.Round)
 }
 
 @Composable
