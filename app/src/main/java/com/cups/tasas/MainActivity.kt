@@ -123,6 +123,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -263,6 +264,20 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Medidas de diseño (dp): la interfaz se escala a partir de ellas para ajustarse a cada pantalla. */
+/** Tamaño de letra fijo en dp: no crece con la letra del sistema (para símbolos dentro de círculos y teclas). */
+@Composable
+private fun fixedSp(v: Float): TextUnit = with(LocalDensity.current) { v.dp.toSp() }
+
+/** Texto centrado en su caja, sin el relleno extra de la fuente (si no, el símbolo queda bajo el centro). */
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+private fun CenteredText(size: TextUnit) = TextStyle(
+    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+    lineHeight = size,
+    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+    ),
+)
+
 private val DESIGN_H = 760.dp
 private val DESIGN_W = 360.dp
 
@@ -291,15 +306,19 @@ private fun Screen(vm: RatesViewModel) {
         // Se adapta a cualquier pantalla: la interfaz se diseña para 360 x 760 dp y se escala por igual
         // (tamaños y letras) según el alto y el ancho reales disponibles. No cambia con el teclado abierto.
         BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        val scale = minOf(maxHeight / DESIGN_H, maxWidth / DESIGN_W).coerceIn(0.62f, 1f)
-        val screenH = maxHeight
+        // La letra del sistema se respeta hasta un 115 % (más allá no cabría en una sola pantalla) y el alto de diseño
+        // crece con ella: con letra grande se reserva más espacio para el monto y la interfaz se encoge un poco más.
         val base = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(base.density * scale, base.fontScale)) {
+        val fs = base.fontScale.coerceIn(0.85f, 1.15f)
+        val designH = DESIGN_H + 35.dp + 175.dp * (fs - 1f)
+        val scale = minOf(maxHeight / designH, maxWidth / DESIGN_W).coerceIn(0.5f, 1f)
+        val screenH = maxHeight
+        CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fs)) {
         Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
         val calc = vm.mode == Mode.Calc
         // La calculadora se reparte en todo el alto (sin deslizar); si ni escalada cabe
         // (pantalla muy baja, p. ej. horizontal), queda el alto de diseño y entonces sí se desliza
-        val contentH = maxOf(screenH / scale, DESIGN_H)
+        val contentH = maxOf(screenH / scale, designH)
         Column(
             Modifier.widthIn(max = 520.dp).fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
@@ -779,9 +798,10 @@ private fun Coin(label: String, color: Color, size: Int) {
             .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.7f)))),
         contentAlignment = Alignment.Center,
     ) {
+        val fixed = fixedSp(size * if (label.length > 1) 0.4f else 0.54f)
         Text(
             label, color = CoinInk, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
-            fontSize = (size * if (label.length > 1) 0.4f else 0.54f).sp,
+            fontSize = fixed, style = CenteredText(fixed),
         )
     }
 }
@@ -1023,6 +1043,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
         alpha = e
         translationY = (1f - e) * 56.dp.toPx()
     }
+    val fontScale = LocalDensity.current.fontScale
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
@@ -1069,7 +1090,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             Modifier.layout { m, c ->
                 val minH = (6 * 34 + 5 * 8).dp.roundToPx()
                 val maxH = (6 * 72 + 5 * 8).dp.roundToPx()
-                val h = (c.maxHeight - 160.dp.roundToPx()).coerceAtLeast(minH).coerceAtMost(maxH)
+                val h = (c.maxHeight - (20f + 175f * fontScale).dp.roundToPx()).coerceAtLeast(minH).coerceAtMost(maxH)
                 val p = m.measure(c.copy(minHeight = h, maxHeight = h))
                 layout(p.width, h) { p.place(0, 0) }
             },
@@ -1123,6 +1144,10 @@ private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(if (k == "C") "AC" else k, color = fg, fontSize = if (k == "C") 20.sp else 26.sp, fontFamily = Manrope, fontWeight = if (isOp || k == "=") FontWeight.Bold else FontWeight.Medium)
+        val fixed = fixedSp(if (k == "C") 20f else 26f)
+        Text(
+            if (k == "C") "AC" else k, color = fg, fontSize = fixed, style = CenteredText(fixed),
+            fontFamily = Manrope, fontWeight = if (isOp || k == "=") FontWeight.Bold else FontWeight.Medium,
+        )
     }
 }
