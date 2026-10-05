@@ -336,7 +336,8 @@ private fun Screen(vm: RatesViewModel) {
                             },
                         ) { compact ->
                             if (compact) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                                // margen para que la burbuja elegida (que crece un poco) no se recorte con el contenedor deslizante
+                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
                                     vm.currenciesAt(d).forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
                                 }
                             } else {
