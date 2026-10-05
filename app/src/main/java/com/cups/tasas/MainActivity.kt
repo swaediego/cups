@@ -122,6 +122,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -309,41 +310,54 @@ private fun Screen(vm: RatesViewModel) {
 
             Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
 
-            Column(Modifier.animateContentSize(tween(380, easing = EaseMove))) {
-                Reveal(2) {
-                    // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
-                    AnimatedContent(
-                        targetState = calc, label = "tiles",
-                        transitionSpec = {
-                            (fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) +
-                                slideInVertically(tween(380, easing = EaseOut)) { it / 3 } +
-                                scaleIn(tween(380, easing = EaseOut), initialScale = 0.9f))
-                                .togetherWith(fadeOut(tween(110)))
-                                .using(SizeTransform(clip = false) { _, _ -> snap() })
-                        },
-                    ) { compact ->
-                        if (compact) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
-                                vm.currencies.forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
-                            }
-                        } else {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                vm.currencies.forEach { c ->
-                                    RateTile(c, vm.rateFor(c), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+            Reveal(2) {
+                // Cada fecha es una "página": al cambiar de día la nueva se desliza desde un lado y la anterior sale
+                // hacia el otro, como pasar la hoja de un libro. Cada página guarda los datos de su propia fecha.
+                AnimatedContent(
+                    targetState = vm.selectedDate, label = "datePage",
+                    transitionSpec = {
+                        val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
+                        val dir = if (back) -1 else 1
+                        (slideInHorizontally(tween(440, easing = EaseMove)) { dir * it } + fadeIn(tween(260, easing = EaseOut)))
+                            .togetherWith(slideOutHorizontally(tween(440, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
+                            .using(SizeTransform(clip = true) { _, _ -> snap() })
+                    },
+                ) { d ->
+                    Column(Modifier.animateContentSize(tween(380, easing = EaseMove))) {
+                        // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
+                        AnimatedContent(
+                            targetState = calc, label = "tiles",
+                            transitionSpec = {
+                                (fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) +
+                                    slideInVertically(tween(380, easing = EaseOut)) { it / 3 } +
+                                    scaleIn(tween(380, easing = EaseOut), initialScale = 0.9f))
+                                    .togetherWith(fadeOut(tween(110)))
+                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
+                            },
+                        ) { compact ->
+                            if (compact) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
+                                    vm.currenciesAt(d).forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
+                                }
+                            } else {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    vm.currenciesAt(d).forEach { c ->
+                                        RateTile(c, vm.rateAt(c, d), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-                // La variación no cabe en la calculadora: se pliega
-                AnimatedVisibility(
-                    visible = !calc,
-                    enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)),
-                    exit = fadeOut(tween(110)),
-                ) {
-                    Column {
-                        Spacer(Modifier.height(18.dp))
-                        Reveal(3) { ChangeCard(cur, vm.changeFor(cur), ink) }
+                        // La variación no cabe en la calculadora: se pliega
+                        AnimatedVisibility(
+                            visible = !calc,
+                            enter = fadeIn(tween(260, delayMillis = 80, easing = EaseOut)),
+                            exit = fadeOut(tween(110)),
+                        ) {
+                            Column {
+                                Spacer(Modifier.height(18.dp))
+                                ChangeCard(cur, vm.changeAt(cur, d), ink)
+                            }
+                        }
                     }
                 }
             }
@@ -629,7 +643,8 @@ private fun DateBar(vm: RatesViewModel, ink: Color, onPick: () -> Unit) {
     val newAvailable = vm.nextDate != null && sel == current
     val shape = RoundedCornerShape(24.dp)
 
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val away = sel != null && sel != current
+    Box {
         Row(
             Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -644,34 +659,49 @@ private fun DateBar(vm: RatesViewModel, ink: Color, onPick: () -> Unit) {
             ) {
                 CalendarIcon(ink, Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
-                AnimatedContent(
-                    targetState = sel, label = "date",
-                    transitionSpec = {
-                        val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
-                        val dir = if (back) -1 else 1
-                        (fadeIn(tween(260, easing = EaseOut)) + slideInHorizontally(tween(280, easing = EaseOut)) { dir * it / 8 })
-                            .togetherWith(fadeOut(tween(100)) + slideOutHorizontally(tween(160, easing = EaseOut)) { -dir * it / 10 })
-                            .using(SizeTransform(clip = false))
-                    },
-                ) { d ->
-                    Column(horizontalAlignment = Alignment.Start) {
-                        Text(labelFor(d), color = ink, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
-                        Text(
-                            d?.let { longDate(it) } ?: "—", color = Ink, fontSize = 17.sp,
-                            fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.2).sp,
-                        )
+                Box {
+                    AnimatedContent(
+                        targetState = sel, label = "date",
+                        transitionSpec = {
+                            val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
+                            val dir = if (back) -1 else 1
+                            (fadeIn(tween(260, easing = EaseOut)) + slideInHorizontally(tween(320, easing = EaseMove)) { dir * it / 3 })
+                                .togetherWith(fadeOut(tween(120)) + slideOutHorizontally(tween(320, easing = EaseMove)) { -dir * it / 3 })
+                                .using(SizeTransform(clip = true))
+                        },
+                    ) { d ->
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text(labelFor(d), color = ink, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+                            Text(
+                                d?.let { longDate(it) } ?: "—", color = Ink, fontSize = 17.sp,
+                                fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.2).sp,
+                            )
+                        }
                     }
                 }
             }
             NavButton(left = false, enabled = vm.nextDate != null, description = "Tasa del día siguiente", badge = newAvailable, onClick = vm::goNext)
         }
-        if (sel != null && sel != current) {
-            Text(
-                "Volver a la tasa de hoy", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.CenterHorizontally).heightIn(min = 40.dp)
-                    .clip(CircleShape).clickable(role = Role.Button, onClick = vm::goCurrent)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-            )
+        // Volver a la tasa de hoy: etiqueta flotante sobre el borde superior de la tarjeta (no ocupa espacio: nada se mueve)
+        androidx.compose.animation.AnimatedVisibility(
+            visible = away, modifier = Modifier.align(Alignment.TopCenter).offset(y = (-21).dp),
+            enter = fadeIn(tween(220, easing = EaseOut)) + scaleIn(tween(300, easing = EaseOut), initialScale = 0.6f) +
+                slideInVertically(tween(300, easing = EaseOut)) { it / 2 },
+            exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.7f),
+        ) {
+            Box(
+                Modifier.size(width = 84.dp, height = 40.dp).clip(CircleShape)
+                    .clickable(role = Role.Button, onClickLabel = "Volver a la tasa de hoy", onClick = vm::goCurrent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "↩ Hoy", color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier
+                        .shadow(6.dp, CircleShape, ambientColor = SoftShadow, spotColor = SoftShadow)
+                        .clip(CircleShape).background(Paper).border(1.dp, ink.copy(alpha = 0.45f), CircleShape)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }

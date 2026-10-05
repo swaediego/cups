@@ -200,19 +200,27 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     val firstDate: LocalDate? get() = dates.firstOrNull()
     val lastDate: LocalDate? get() = dates.lastOrNull()
 
-    fun rateFor(c: Cur): Rate? {
-        if (c == Cur.USDT && pinned == null) usdtLive?.let { return it }
-        val s = selectedDate ?: return null
+    fun rateFor(c: Cur): Rate? = rateAt(c, selectedDate)
+
+    /** Tasa de una fecha concreta (la pantalla conserva la "página" anterior mientras se desliza a la nueva). */
+    fun rateAt(c: Cur, d: LocalDate?): Rate? {
+        if (c == Cur.USDT && d != null && d == currentDate) usdtLive?.let { return it }
+        val s = d ?: return null
         return history[c]?.lastOrNull { !it.date.isAfter(s) } ?: history[c]?.firstOrNull()
     }
 
     /** Cambio frente a la publicación anterior de la misma moneda. */
-    fun changeFor(c: Cur): Change? {
-        val r = rateFor(c) ?: return null
+    fun changeFor(c: Cur): Change? = changeAt(c, selectedDate)
+
+    fun changeAt(c: Cur, d: LocalDate?): Change? {
+        val r = rateAt(c, d) ?: return null
         val prev = history[c]?.lastOrNull { it.date.isBefore(r.date) } ?: return null
         val diff = r.value - prev.value
         return Change(diff, diff / prev.value * 100, prev.date)
     }
+
+    /** El USDT solo existe para la tasa vigente de hoy. */
+    fun currenciesAt(d: LocalDate?): List<Cur> = if (d == currentDate) Cur.entries else Cur.entries.filter { it.official }
 
     private var lastSync = RatesSync.lastSync(prefs)
 
