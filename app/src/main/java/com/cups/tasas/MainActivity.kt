@@ -360,10 +360,9 @@ private fun Screen(vm: RatesViewModel) {
                         AnimatedContent(
                             targetState = calc, label = "tiles",
                             transitionSpec = {
-                                (fadeIn(tween(260, delayMillis = 80, easing = EaseOut)) +
-                                    slideInVertically(tween(380, easing = EaseOut)) { it / 3 } +
-                                    scaleIn(tween(380, easing = EaseOut), initialScale = 0.9f))
-                                    .togetherWith(fadeOut(tween(110)))
+                                val dir = if (targetState) 1 else -1
+                                (slideInHorizontally(tween(420, easing = EaseMove)) { dir * it } + fadeIn(tween(240, easing = EaseOut)))
+                                    .togetherWith(slideOutHorizontally(tween(420, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
                                     .using(SizeTransform(clip = false) { _, _ -> snap() })
                             },
                         ) { compact ->
@@ -417,11 +416,10 @@ private fun Screen(vm: RatesViewModel) {
                     targetState = vm.mode, label = "panel",
                     modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
-                        // El panel nuevo sube desde abajo mientras aparece; el anterior se desvanece enseguida
-                        val toCalc = targetState == Mode.Calc
-                        (fadeIn(tween(300, delayMillis = 60, easing = EaseOut)) +
-                            slideInVertically(tween(440, easing = EaseOut)) { if (toCalc) it / 5 else it / 10 })
-                            .togetherWith(fadeOut(tween(110)))
+                        // Pasar de página: el panel nuevo entra por un lado y el anterior sale por el otro
+                        val dir = if (targetState == Mode.Calc) 1 else -1
+                        (slideInHorizontally(tween(420, easing = EaseMove)) { dir * it } + fadeIn(tween(240, easing = EaseOut)))
+                            .togetherWith(slideOutHorizontally(tween(420, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
                             .using(SizeTransform(clip = false) { _, _ -> snap() })
                     },
                 ) { m ->
@@ -1060,14 +1058,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val toInk = if (inBs) ink else Muted
     val shown = vm.expr.ifEmpty { "0" }
     // Entrada: el encabezado y cada fila del teclado suben desde abajo en cascada (solo capa gráfica: sin recomponer)
-    val enter = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { enter.animateTo(1f, tween(760, easing = LinearEasing)) }
-    fun Modifier.rise(i: Int) = graphicsLayer {
-        val t = ((enter.value * 760f - 70f - i * 45f) / 380f).coerceIn(0f, 1f)
-        val e = EaseOut.transform(t)
-        alpha = e
-        translationY = (1f - e) * 56.dp.toPx()
-    }
+    fun Modifier.rise(@Suppress("UNUSED_PARAMETER") i: Int) = this  // sin cascada: el panel entero se desliza de lado
     val fontScale = LocalDensity.current.fontScale
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(
@@ -1149,12 +1140,12 @@ private fun PageDots(onBack: () -> Unit, ink: Color) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         // dos casillas iguales, cada punto centrado en la suya: el conjunto queda simétrico respecto al centro
         Box(
-            Modifier.size(width = 32.dp, height = 28.dp).clip(CircleShape)
+            Modifier.size(width = 26.dp, height = 24.dp).clip(CircleShape)
                 .clickable(role = Role.Button, onClickLabel = "Volver a Convertir", onClick = onBack),
             contentAlignment = Alignment.Center,
-        ) { Box(Modifier.size(7.dp).clip(CircleShape).background(Muted.copy(alpha = 0.4f))) }
-        Box(Modifier.size(width = 32.dp, height = 28.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(width = 22.dp, height = 7.dp).clip(CircleShape).background(ink))
+        ) { Box(Modifier.size(5.dp).clip(CircleShape).background(Muted.copy(alpha = 0.4f))) }
+        Box(Modifier.size(width = 26.dp, height = 24.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(width = 16.dp, height = 5.dp).clip(CircleShape).background(ink))
         }
     }
 }
