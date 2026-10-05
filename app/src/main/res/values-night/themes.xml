@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Con el teléfono en oscuro la app declara tema oscuro propio; así Android no la oscurece a la fuerza.
+         Los colores reales los pinta la app (AppTheme), claros u oscuros según su modo. -->
+    <style name="Theme.Cups" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
