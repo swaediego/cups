@@ -54,6 +54,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.Lifecycle
@@ -310,7 +312,7 @@ private fun Screen(vm: RatesViewModel) {
         // crece con ella: con letra grande se reserva más espacio para el monto y la interfaz se encoge un poco más.
         val base = LocalDensity.current
         val fs = base.fontScale.coerceIn(0.85f, 1.15f)
-        val designH = DESIGN_H + 35.dp + 175.dp * (fs - 1f)
+        val designH = DESIGN_H + 150.dp * (fs - 1f)
         val scale = minOf(maxHeight / designH, maxWidth / DESIGN_W).coerceIn(0.5f, 1f)
         val screenH = maxHeight
         CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fs)) {
@@ -355,10 +357,7 @@ private fun Screen(vm: RatesViewModel) {
                             },
                         ) { compact ->
                             if (compact) {
-                                // margen para que la burbuja elegida (que crece un poco) no se recorte con el contenedor deslizante
-                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)) {
-                                    vm.currenciesAt(d).forEach { c -> CurBubble(c, c == cur) { vm.onCurrency(c) } }
-                                }
+                                CalcCurrencies(vm, cur, d)
                             } else {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     vm.currenciesAt(d).forEach { c ->
@@ -1033,10 +1032,6 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     val fromSym = if (inBs) "Bs" else cur.symbol
     val toSym = if (inBs) cur.symbol else "Bs"
     val toInk = if (inBs) ink else Muted
-    val fromName = if (inBs) "Bolívares" else cur.label
-    val toName = if (inBs) cur.label else "Bolívares"
-    val fromColor = if (inBs) Red else accentOf(cur)
-    val toColor = if (inBs) accentOf(cur) else Red
     val shown = vm.expr.ifEmpty { "0" }
     // Entrada: el encabezado y cada fila del teclado suben desde abajo en cascada (solo capa gráfica: sin recomponer)
     val enter = remember { Animatable(0f) }
@@ -1053,8 +1048,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // De qué moneda a cuál: una burbuja por moneda, centradas; tocarlas intercambia las monedas
-            SwapPills(inBs, fromSym, fromName, fromColor, toSym, toName, toColor, onClick = vm::toggleCalcSide)
+            Spacer(Modifier.height(1.dp))
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                 Text(
                     shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
@@ -1086,7 +1080,7 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
             Modifier.layout { m, c ->
                 val minH = (6 * 34 + 5 * 8).dp.roundToPx()
                 val maxH = (6 * 72 + 5 * 8).dp.roundToPx()
-                val h = (c.maxHeight - (20f + 175f * fontScale).dp.roundToPx()).coerceAtLeast(minH).coerceAtMost(maxH)
+                val h = (c.maxHeight - (10f + 150f * fontScale).dp.roundToPx()).coerceAtLeast(minH).coerceAtMost(maxH)
                 val p = m.measure(c.copy(minHeight = h, maxHeight = h))
                 layout(p.width, h) { p.place(0, 0) }
             },
@@ -1101,41 +1095,72 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     }
 }
 
-/** Burbuja de una moneda: su círculo con el símbolo y el nombre. */
+/** Burbuja de una moneda: su círculo con el símbolo y el nombre (con ▾ si abre una lista). */
 @Composable
-private fun CurPill(sym: String, name: String, color: Color) {
+private fun CurPill(sym: String, name: String, color: Color, modifier: Modifier = Modifier, chevron: Boolean = false) {
     Row(
-        Modifier.clip(CircleShape).background(color.copy(alpha = 0.16f)).padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+        modifier.clip(CircleShape).background(color.copy(alpha = 0.16f))
+            .padding(start = 4.dp, end = if (chevron) 8.dp else 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Coin(sym, color, 24)
         Text(name, color = Ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+        if (chevron) Text("▾", color = Muted, fontSize = 12.sp)
     }
 }
 
-/** Las dos burbujas de moneda, centradas: al tocarlas se intercambian; la flecha da media vuelta y se oyen como un botón. */
+/**
+ * Franja de monedas de la calculadora (ocupa el lugar de las tarjetas): dos burbujas centradas, Bolívares y la moneda extranjera.
+ * Tocar la flecha o Bolívares intercambia el sentido; tocar la moneda extranjera abre la lista para elegir Dólar, Euro o USDT.
+ */
 @Composable
-private fun SwapPills(
-    inBs: Boolean, fromSym: String, fromName: String, fromColor: Color, toSym: String, toName: String, toColor: Color, onClick: () -> Unit,
-) {
+private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
+    val inBs = vm.calcInBs
     val turn by animateFloatAsState(if (inBs) 0f else 180f, tween(360, easing = EaseMove), label = "swap")
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.95f else 1f, tween(160, easing = EaseOut), label = "swapPress")
-    Row(
-        Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,
-    ) {
+    var menu by remember { mutableStateOf(false) }
+    val foreign: @Composable () -> Unit = {
+        Box {
+            CurPill(cur.symbol, cur.label, accentOf(cur), chevron = true, modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Elegir moneda") { menu = true })
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Paper) {
+                vm.currenciesAt(d).forEach { c ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Coin(c.symbol, accentOf(c), 26)
+                                Column {
+                                    Text(c.label, color = Ink, fontFamily = Manrope, fontWeight = if (c == cur) FontWeight.ExtraBold else FontWeight.SemiBold, fontSize = 15.sp)
+                                    vm.rateAt(c, d)?.let { Text("Bs. ${money(it.value)}", color = Muted, fontFamily = Manrope, fontSize = 12.sp) }
+                                }
+                            }
+                        },
+                        onClick = { vm.onCurrency(c); menu = false },
+                    )
+                }
+            }
+        }
+    }
+    val bs: @Composable () -> Unit = {
+        CurPill("Bs", "Bolívares", Red, modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Invertir conversión", onClick = vm::toggleCalcSide))
+    }
+    // margen para que las burbujas no se recorten con el contenedor deslizante
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape)
-                .clickable(interactionSource = press, indication = null, role = Role.Button, onClick = onClick)
-                .padding(4.dp)
-                .semantics { contentDescription = "Invertir conversión: de $fromName a $toName" },
+            Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CurPill(fromSym, fromName, fromColor)
-            val fixed = fixedSp(18f)
-            Text("⇄", color = Muted, fontSize = fixed, style = CenteredText(fixed), modifier = Modifier.graphicsLayer { rotationZ = turn })
-            CurPill(toSym, toName, toColor)
+            if (inBs) bs() else foreign()
+            Box(
+                Modifier.size(32.dp).clip(CircleShape)
+                    .clickable(interactionSource = press, indication = null, role = Role.Button, onClickLabel = "Invertir conversión", onClick = vm::toggleCalcSide),
+                contentAlignment = Alignment.Center,
+            ) {
+                val fixed = fixedSp(20f)
+                Text("⇄", color = Muted, fontSize = fixed, style = CenteredText(fixed), modifier = Modifier.graphicsLayer { rotationZ = turn })
+            }
+            if (inBs) foreign() else bs()
         }
     }
 }
