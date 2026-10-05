@@ -1015,12 +1015,12 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
                 listOf("7", "8", "9", "−"),
                 listOf("4", "5", "6", "+"),
                 listOf("1", "2", "3", "="),
-                listOf("0", "00", ","),
+                listOf("0", ","),
             )
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 2f else 1f).height(keyH), vm) }
+                        row.forEach { k -> CalcKey(k, accent, ink, Modifier.weight(if (k == "0") 3f else 1f).height(keyH), vm) }
                     }
                 }
             }
