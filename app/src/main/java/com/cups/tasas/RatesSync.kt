@@ -49,6 +49,7 @@ object RatesSync {
     private const val CHANNEL = "rates"
     private const val NOTIFIED = "rate_notified"
     private const val LAST_SYNC = "last_sync"
+    private const val NEXT_CHECK = "next_check"
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("rates", 0)
 
@@ -102,19 +103,39 @@ object RatesSync {
 
     class Result(val history: Map<Cur, List<Rate>>, val live: Rate?)
 
-    /** Pide todas las tasas y las guarda. Devuelve null si no hubo conexión con el BCV. */
-    fun pull(prefs: SharedPreferences): Result? {
-        val fetched = Cur.entries.associateWith { c -> runCatching { fetch(c) }.getOrNull() }
-        val live = runCatching { fetchLive() }.getOrNull()
+    /** Une lo descargado con lo guardado: una tasa futura guardada no se pierde si la respuesta aún no la trae. */
+    private fun merge(fetched: List<Rate>?, stored: List<Rate>): List<Rate> {
+        val last = fetched?.lastOrNull()?.date ?: return stored
+        return fetched + stored.filter { it.date.isAfter(last) }
+    }
+
+    /**
+     * Pide las tasas y las guarda. Devuelve null si no hubo conexión con el BCV.
+     * [officialOnly]: solo USD/EUR del BCV (comprobación de la tasa futura); no toca el USDT ni [lastSync].
+     */
+    fun pull(prefs: SharedPreferences, officialOnly: Boolean = false): Result? {
+        prefs.edit().putLong(NEXT_CHECK, System.currentTimeMillis()).apply()
+        val curs = Cur.entries.filter { it.official || !officialOnly }
+        val fetched = curs.associateWith { c -> runCatching { fetch(c) }.getOrNull() }
+        val live = if (officialOnly) null else runCatching { fetchLive() }.getOrNull()
         if (Cur.entries.filter { it.official }.all { fetched[it] == null }) return null
-        val fresh = Cur.entries.associateWith { fetched[it] ?: load(prefs, it) }
+        val fresh = Cur.entries.associateWith { c ->
+            if (c.official) merge(fetched[c], load(prefs, c)) else fetched[c] ?: load(prefs, c)
+        }
         prefs.edit().apply {
             fresh.forEach { (c, list) -> putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}" }) }
             live?.let { putString("usdt_live", "${it.date}=${it.value}") }
-            putLong(LAST_SYNC, System.currentTimeMillis())
+            if (!officialOnly) putLong(LAST_SYNC, System.currentTimeMillis())
         }.apply()
         return Result(fresh, live)
     }
+
+    /**
+     * ¿Toca preguntar si el BCV ya publicó la tasa futura? Solo si no hay una guardada y la última consulta
+     * (de cualquier tipo) fue hace más de 5 min. No depende de [lastSync]: el resto de tasas pueden estar frescas.
+     */
+    fun nextCheckDue(prefs: SharedPreferences): Boolean =
+        !isPublished(prefs) && System.currentTimeMillis() - prefs.getLong(NEXT_CHECK, 0L) > 5 * 60 * 1000
 
     /** Descarga desde un trabajo en segundo plano y avisa (en silencio) si el BCV publicó una tasa nueva. */
     fun syncInBackground(ctx: Context) {

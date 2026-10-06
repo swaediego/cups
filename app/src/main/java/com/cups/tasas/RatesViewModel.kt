@@ -237,6 +237,20 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         if (loading) return
         reloadFromPrefs()
         if (System.currentTimeMillis() - lastSync > 10 * 60 * 1000) refresh(silent = dates.isNotEmpty())
+        else if (RatesSync.nextCheckDue(prefs)) checkNextBcv()
+    }
+
+    private var checkingNext = false
+
+    /** Sin tasa futura guardada: pregunta solo por el BCV aunque el resto de tasas estén frescas. */
+    private fun checkNextBcv() {
+        if (checkingNext) return
+        checkingNext = true
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { RatesSync.pull(prefs, officialOnly = true) }
+            if (r != null) { history = r.history; recalc() }
+            checkingNext = false
+        }
     }
 
     /** [silent]: sin indicador de carga ni mensaje de error (actualización automática). */
