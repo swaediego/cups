@@ -22,6 +22,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Duration
@@ -34,6 +35,9 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private const val LIVE_URL = "https://ve.dolarapi.com/v1/dolares"
+/** Segunda fuente del BCV: publica la tasa del siguiente día antes que dolarapi (fecha valor + USD/EUR). */
+private const val NEXT_URL = "https://datos.cromstudio.com.ve/tasa"
+private val MONTHS = listOf("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
 
 /**
  * Descarga y guardado de tasas, compartido por la pantalla y los trabajos en segundo plano.
@@ -79,6 +83,33 @@ object RatesSync {
         return null
     }
 
+    /** Fecha valor y tasas USD/EUR que el BCV tiene publicadas ahora mismo (puede ser la del siguiente día). */
+    fun fetchNextBcv(): Pair<LocalDate, Map<Cur, Double>>? {
+        val conn = URL(NEXT_URL).openConnection() as HttpURLConnection
+        conn.connectTimeout = 10000
+        conn.readTimeout = 15000
+        val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        val m = Regex("""(\d{1,2})\s+([A-Za-zñÑ]+)\s+(\d{4})""").find(o.getString("fecha_valor")) ?: return null
+        val month = MONTHS.indexOf(m.groupValues[2].lowercase()) + 1
+        if (month == 0) return null
+        val date = LocalDate.of(m.groupValues[3].toInt(), month, m.groupValues[1].toInt())
+        val t = o.getJSONObject("tasas")
+        val rates = mapOf(Cur.USD to t.optDouble("USD"), Cur.EUR to t.optDouble("EUR")).filterValues { it.isFinite() && it > 0 }
+        return if (rates.isEmpty()) null else date to rates
+    }
+
+    /** Si aún no hay tasa futura guardada, la busca en la segunda fuente; descarta valores muy distintos a la última tasa. */
+    private fun addNext(h: Map<Cur, List<Rate>>): Map<Cur, List<Rate>> {
+        val last = lastOfficialDate(h)
+        if (last != null && last.isAfter(LocalDate.now(CARACAS))) return h
+        val n = runCatching { fetchNextBcv() }.getOrNull() ?: return h
+        if (last != null && !n.first.isAfter(last)) return h
+        return h.mapValues { (c, l) ->
+            val v = n.second[c]
+            if (v == null || l.isEmpty() || Math.abs(v / l.last().value - 1) > 0.2) l else l + Rate(v, n.first)
+        }
+    }
+
     fun load(prefs: SharedPreferences, c: Cur): List<Rate> {
         val raw = prefs.getString("hist_${c.name}", null) ?: return emptyList()
         return raw.split(';').mapNotNull { e ->
@@ -119,9 +150,9 @@ object RatesSync {
         val fetched = curs.associateWith { c -> runCatching { fetch(c) }.getOrNull() }
         val live = if (officialOnly) null else runCatching { fetchLive() }.getOrNull()
         if (Cur.entries.filter { it.official }.all { fetched[it] == null }) return null
-        val fresh = Cur.entries.associateWith { c ->
+        val fresh = addNext(Cur.entries.associateWith { c ->
             if (c.official) merge(fetched[c], load(prefs, c)) else fetched[c] ?: load(prefs, c)
-        }
+        })
         prefs.edit().apply {
             fresh.forEach { (c, list) -> putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}" }) }
             live?.let { putString("usdt_live", "${it.date}=${it.value}") }
