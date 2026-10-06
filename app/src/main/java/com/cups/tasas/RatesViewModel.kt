@@ -14,6 +14,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDate
 import java.util.Locale
+import kotlin.math.roundToInt
 
 enum class Cur(val label: String, val symbol: String, val url: String, val official: Boolean = true) {
     USD("Dólar", "$", "https://ve.dolarapi.com/v1/historicos/dolares/oficial"),
@@ -28,7 +29,8 @@ enum class Mode { Convert, Calc }
 data class Rate(val value: Double, val date: LocalDate)
 
 /** Variación de una tasa respecto a la publicación anterior. */
-data class Change(val diff: Double, val pct: Double, val since: LocalDate)
+/** [hours] != null: el cambio es contra una muestra de hace esas horas (USDT), no contra la publicación anterior. */
+data class Change(val diff: Double, val pct: Double, val since: LocalDate, val hours: Int? = null)
 
 /**
  * Evalúa una expresión con + − × ÷, paréntesis y % (con precedencia).
@@ -116,6 +118,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
 
     private var justEvaluated = false
     private var usdtLive by mutableStateOf(RatesSync.loadLive(prefs))
+    private var liveSamples by mutableStateOf(RatesSync.loadSamples(prefs))
 
     /** Fecha de tasa elegida por el usuario; null = seguir la tasa vigente de hoy. */
     private var pinned by mutableStateOf<LocalDate?>(null)
@@ -213,6 +216,16 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     fun changeFor(c: Cur): Change? = changeAt(c, selectedDate)
 
     fun changeAt(c: Cur, d: LocalDate?): Change? {
+        // USDT de hoy: contra la última muestra de hace una hora o más (hasta 6 h); sin ella, contra la publicación anterior
+        if (c == Cur.USDT && d != null && d == currentDate) {
+            val live = usdtLive
+            val ref = liveSamples.lastOrNull { System.currentTimeMillis() - it.first in 50 * 60_000L..6 * 3_600_000L }
+            if (live != null && ref != null) {
+                val diff = live.value - ref.second
+                val h = ((System.currentTimeMillis() - ref.first) / 3_600_000.0).roundToInt().coerceAtLeast(1)
+                return Change(diff, diff / ref.second * 100, live.date, h)
+            }
+        }
         val r = rateAt(c, d) ?: return null
         val prev = history[c]?.lastOrNull { it.date.isBefore(r.date) } ?: return null
         val diff = r.value - prev.value
@@ -228,6 +241,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
     private fun reloadFromPrefs() {
         history = RatesSync.loadAll(prefs)
         RatesSync.loadLive(prefs)?.let { usdtLive = it }
+        liveSamples = RatesSync.loadSamples(prefs)
         lastSync = RatesSync.lastSync(prefs)
         recalc()
     }
@@ -261,7 +275,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
             val r = withContext(Dispatchers.IO) { RatesSync.pull(prefs) }
             if (r != null) {
                 history = r.history
-                if (r.live != null) usdtLive = r.live
+                if (r.live != null) { usdtLive = r.live; liveSamples = RatesSync.loadSamples(prefs) }
                 lastSync = RatesSync.lastSync(prefs)
                 recalc()
             } else if (!silent) {

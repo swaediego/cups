@@ -123,6 +123,22 @@ object RatesSync {
         return try { Rate(p[1].toDouble(), LocalDate.parse(p[0])) } catch (x: Exception) { null }
     }
 
+    /** Muestras (momento ms, valor) del USDT en vivo, para comparar con hace ~1 hora. */
+    fun loadSamples(prefs: SharedPreferences): List<Pair<Long, Double>> =
+        prefs.getString("usdt_samples", null)?.split(';')?.mapNotNull { e ->
+            val p = e.split('=')
+            val t = p.getOrNull(0)?.toLongOrNull()
+            val v = p.getOrNull(1)?.toDoubleOrNull()
+            if (t == null || v == null) null else t to v
+        } ?: emptyList()
+
+    private fun addSample(prefs: SharedPreferences, v: Double): String {
+        val now = System.currentTimeMillis()
+        val all = loadSamples(prefs).filter { now - it.first <= 8 * 3_600_000L }
+        val out = if (all.isEmpty() || now - all.last().first >= 10 * 60_000L) all + (now to v) else all
+        return out.joinToString(";") { "${it.first}=${it.second}" }
+    }
+
     fun loadAll(prefs: SharedPreferences) = Cur.entries.associateWith { load(prefs, it) }
 
     /** Momento (ms) de la última descarga exitosa, de la pantalla o de segundo plano. */
@@ -155,7 +171,7 @@ object RatesSync {
         })
         prefs.edit().apply {
             fresh.forEach { (c, list) -> putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}" }) }
-            live?.let { putString("usdt_live", "${it.date}=${it.value}") }
+            live?.let { putString("usdt_live", "${it.date}=${it.value}"); putString("usdt_samples", addSample(prefs, it.value)) }
             if (!officialOnly) putLong(LAST_SYNC, System.currentTimeMillis())
         }.apply()
         return Result(fresh, live)

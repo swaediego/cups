@@ -1007,7 +1007,7 @@ private fun ChangeCard(c: Cur, ch: Change?, ink: Color) {
         val verb = if (up) "subió" else if (down) "bajó" else "se mantuvo"
         val sign = if (up) "▲ +" else if (down) "▼ −" else "• "
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Tick("${c.label} $verb vs. ${shortDate(ch.since)}") { t ->
+            Tick("${c.label} $verb ${ch.hours?.let { if (it == 1) "en la última hora" else "en las últimas $it horas" } ?: "vs. ${shortDate(ch.since)}"}") { t ->
                 Text(t, color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
             }
             Tick("$sign${money(kotlin.math.abs(ch.diff))} Bs") { t ->
