@@ -9,3 +9,22 @@ captures/
 *.apk
 *.keystore
 *.jks
+
+# Secretos: llaves y credenciales de firma
+keystore/
+keystore.properties
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+google-services.json
+secrets.properties
+
+# Contexto de cómo se hizo el proyecto (instrucciones/notas para el asistente)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+AGENTS.md
+NOTES.md
+PROMPTS.md

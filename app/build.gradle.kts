@@ -17,12 +17,16 @@ android {
     }
     // Llave fija del proyecto (keystore/cups.keystore, fuera de git): todo APK que se publique
     // debe firmarse con ella para que Android permita actualizar encima de la versión instalada.
+    // Las credenciales viven en keystore/keystore.properties (fuera de git).
+    val ks = java.util.Properties().apply {
+        rootProject.file("keystore/keystore.properties").inputStream().use { load(it) }
+    }
     signingConfigs {
         create("cups") {
             storeFile = rootProject.file("keystore/cups.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            storePassword = ks.getProperty("storePassword")
+            keyAlias = ks.getProperty("keyAlias")
+            keyPassword = ks.getProperty("keyPassword")
         }
     }
     buildTypes {
