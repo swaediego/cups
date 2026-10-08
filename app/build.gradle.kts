@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,7 +20,7 @@ android {
     // Llave fija del proyecto (keystore/cups.keystore, fuera de git): todo APK que se publique
     // debe firmarse con ella para que Android permita actualizar encima de la versión instalada.
     // Las credenciales viven en keystore/keystore.properties (fuera de git).
-    val ks = java.util.Properties().apply {
+    val ks = Properties().apply {
         rootProject.file("keystore/keystore.properties").inputStream().use { load(it) }
     }
     signingConfigs {
