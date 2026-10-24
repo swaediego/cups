@@ -134,6 +134,9 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -299,25 +302,14 @@ private val esVE = Locale("es", "VE")
 private fun shortDate(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("d MMM", esVE)).replace(".", "")
 private fun longDate(d: LocalDate) = d.format(DateTimeFormatter.ofPattern("EEE d MMM yyyy", esVE)).replace(".", "").replace(",", "")
 
+/**
+ * Se adapta a cualquier pantalla: la interfaz se diseña para 360 x 760 dp y se escala por igual (tamaños y letras)
+ * según el alto y el ancho reales disponibles. No cambia con el teclado abierto. [content] recibe el alto de
+ * contenido: el de la pantalla, o el de diseño si ni escalada cabe (pantalla muy baja, p. ej. horizontal; ahí sí se desliza).
+ */
 @Composable
-private fun Screen(vm: RatesViewModel) {
-    val cur = vm.currency
-    val accent by animateColorAsState(accentOf(cur), tween(500, easing = EaseOut), label = "accent")
-    val ink by animateColorAsState(inkOf(cur), tween(500, easing = EaseOut), label = "ink")
-    val keyboard = LocalSoftwareKeyboardController.current
-    var picking by remember { mutableStateOf(false) }
-    var updating by remember { mutableStateOf(false) }
-
-    Box(
-        Modifier.fillMaxSize().background(Paper).drawWithCache {
-            val a = Brush.radialGradient(listOf(accent.copy(alpha = 0.16f), Color.Transparent), Offset(size.width * 0.1f, -40f), size.width)
-            val b = Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f)
-            onDrawBehind { drawRect(a); drawRect(b) }
-        }
-    ) {
-        // Se adapta a cualquier pantalla: la interfaz se diseña para 360 x 760 dp y se escala por igual
-        // (tamaños y letras) según el alto y el ancho reales disponibles. No cambia con el teclado abierto.
-        BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+private fun ScaledPage(content: @Composable (contentH: Dp) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         // La letra del sistema se respeta hasta un 115 % (más allá no cabría en una sola pantalla) y el alto de diseño
         // crece con ella: con letra grande se reserva más espacio para el monto y la interfaz se encoge un poco más.
         val base = LocalDensity.current
@@ -326,112 +318,80 @@ private fun Screen(vm: RatesViewModel) {
         val scale = minOf(maxHeight / designH, maxWidth / DESIGN_W).coerceIn(0.5f, 1f)
         val screenH = maxHeight
         CompositionLocalProvider(LocalDensity provides Density(base.density * scale, fs)) {
-        Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
-        val calc = vm.mode == Mode.Calc
-        BackHandler(enabled = calc) { vm.onMode(Mode.Convert) }
-        // La calculadora se reparte en todo el alto (sin deslizar); si ni escalada cabe
-        // (pantalla muy baja, p. ej. horizontal), queda el alto de diseño y entonces sí se desliza
-        val contentH = maxOf(screenH / scale, designH)
-        Column(
-            Modifier.widthIn(max = 520.dp).fillMaxSize().verticalScroll(rememberScrollState())
-                .pointerInput(calc) {
-                    // Deslizar a la derecha vuelve a Convertir; a la izquierda entra a la Calculadora (desde cualquier parte)
-                    var dx = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dx = 0f },
-                        onHorizontalDrag = { _, d -> dx += d },
-                        onDragEnd = {
-                            val t = 90.dp.toPx()
-                            if (dx > t && calc) vm.onMode(Mode.Convert) else if (dx < -t && !calc) vm.onMode(Mode.Calc)
+            Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
+                content(maxOf(screenH / scale, designH))
+            }
+        }
+    }
+}
+
+/** Columna de una pantalla: ancho máximo, márgenes y el alto repartido (12 arriba + 16 abajo). */
+@Composable
+private fun PageColumn(contentH: Dp, gap: Dp = 18.dp, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.widthIn(max = 520.dp).fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
+            .height(contentH - 28.dp),
+        verticalArrangement = Arrangement.spacedBy(gap),
+        content = content,
+    )
+}
+
+/** Fondo de la app: papel con un brillo del color de acento arriba a la izquierda y uno azul abajo a la derecha. */
+private fun Modifier.appBackground(accent: Color) = background(Paper).drawWithCache {
+    val a = Brush.radialGradient(listOf(accent.copy(alpha = 0.16f), Color.Transparent), Offset(size.width * 0.1f, -40f), size.width)
+    val b = Brush.radialGradient(listOf(Blue.copy(alpha = 0.08f), Color.Transparent), Offset(size.width, size.height * 0.8f), size.width * 0.9f)
+    onDrawBehind { drawRect(a); drawRect(b) }
+}
+
+@Composable
+private fun Screen(vm: RatesViewModel) {
+    val cur = vm.currency
+    val accent by animateColorAsState(accentOf(cur), tween(500, easing = EaseOut), label = "accent")
+    val ink by animateColorAsState(inkOf(cur), tween(500, easing = EaseOut), label = "ink")
+    val keyboard = LocalSoftwareKeyboardController.current
+    var picking by remember { mutableStateOf(false) }
+    var updating by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+
+    // Atrás: primero cierra el menú; si no, la pantalla aparte abierta (manda el último BackHandler compuesto)
+    BackHandler(enabled = vm.page != null) { keyboard?.hide(); vm.openPage(null) }
+    BackHandler(enabled = menu) { menu = false }
+
+    Box(Modifier.fillMaxSize().appBackground(accent)) {
+        ScaledPage { contentH ->
+            PageColumn(contentH) {
+                Reveal(0) { Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onMenu = { menu = true }) }
+
+                Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
+
+                Reveal(2) {
+                    // Cada fecha es una "página": al cambiar de día la nueva se desliza desde un lado y la anterior sale
+                    // hacia el otro, como pasar la hoja de un libro. Cada página guarda los datos de su propia fecha.
+                    AnimatedContent(
+                        targetState = vm.selectedDate, label = "datePage",
+                        transitionSpec = {
+                            val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
+                            val dir = if (back) -1 else 1
+                            (slideInHorizontally(tween(440, easing = EaseMove)) { dir * it } + fadeIn(tween(260, easing = EaseOut)))
+                                .togetherWith(slideOutHorizontally(tween(440, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
+                                .using(SizeTransform(clip = true) { _, _ -> snap() })
                         },
-                    )
-                }
-                .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 16.dp)
-                .height(contentH - 28.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            Reveal(0) { Header(vm.loading, vm.update != null, onRefresh = vm::refresh, onUpdate = { updating = true }, onTheme = vm::toggleTheme) }
-
-            Reveal(1) { DateBar(vm, ink, onPick = { picking = true }) }
-
-            Reveal(2) {
-                // Cada fecha es una "página": al cambiar de día la nueva se desliza desde un lado y la anterior sale
-                // hacia el otro, como pasar la hoja de un libro. Cada página guarda los datos de su propia fecha.
-                AnimatedContent(
-                    targetState = vm.selectedDate, label = "datePage",
-                    transitionSpec = {
-                        val back = targetState != null && initialState != null && targetState!!.isBefore(initialState!!)
-                        val dir = if (back) -1 else 1
-                        // En la calculadora solo hay símbolos de moneda, que son los mismos en todas las fechas:
-                        // no se desliza nada (los datos cambian en su sitio)
-                        if (calc) EnterTransition.None.togetherWith(ExitTransition.None).using(SizeTransform(clip = false) { _, _ -> snap() })
-                        else (slideInHorizontally(tween(440, easing = EaseMove)) { dir * it } + fadeIn(tween(260, easing = EaseOut)))
-                            .togetherWith(slideOutHorizontally(tween(440, easing = EaseMove)) { -dir * it } + fadeOut(tween(300)))
-                            .using(SizeTransform(clip = true) { _, _ -> snap() })
-                    },
-                ) { d ->
-                    Column {
-                        // Monedas: tarjetas completas; en la calculadora se encogen a burbujas con el símbolo
-                        AnimatedContent(
-                            targetState = calc, label = "tiles",
-                            transitionSpec = {
-                                // Mismo deslizamiento que el panel
-                                val dir = if (targetState) 1 else -1
-                                (slideInHorizontally(SLIDE) { dir * it } + fadeIn(tween(220, easing = EaseOut)))
-                                    .togetherWith(slideOutHorizontally(SLIDE) { -dir * it } + fadeOut(tween(260)))
-                                    .using(SizeTransform(clip = false) { _, _ -> snap() })
-                            },
-                        ) { compact ->
-                            if (compact) {
-                                CalcCurrencies(vm, cur, d)
-                            } else {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    vm.currenciesAt(d).forEach { c ->
-                                        RateTile(c, vm.rateAt(c, d), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
-                                    }
+                    ) { d ->
+                        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                vm.currenciesAt(d).forEach { c ->
+                                    RateTile(c, vm.rateAt(c, d), c == cur, Modifier.weight(1f)) { vm.onCurrency(c) }
                                 }
                             }
-                        }
-                        // La variación no cabe en la calculadora: se pliega
-                        AnimatedVisibility(
-                            visible = !calc,
-                            enter = fadeIn(tween(220, delayMillis = 60, easing = EaseOut)),
-                            exit = fadeOut(tween(80)),
-                        ) {
-                            Column {
-                                Spacer(Modifier.height(18.dp))
-                                ChangeCard(cur, vm.changeAt(cur, d), ink)
-                            }
+                            ChangeCard(cur, vm.changeAt(cur, d), ink)
                         }
                     }
                 }
-            }
 
-            androidx.compose.animation.AnimatedVisibility(
-                visible = !calc,
-                enter = fadeIn(tween(220, delayMillis = 60, easing = EaseOut)),
-                exit = fadeOut(tween(80)),
-            ) { Reveal(4) { ModeToggle(vm.mode, ink, vm::onMode) } }
-
-            val r = vm.rateFor(cur)
-            val shape = RoundedCornerShape(28.dp)
-            Reveal(5, Modifier.weight(1f)) {
-                // Convertir ↔ Calculadora: el panel nuevo sube con fundido y la altura se ajusta suavemente
-                AnimatedContent(
-                    targetState = vm.mode, label = "panel",
-                    modifier = Modifier.fillMaxSize(),
-                    transitionSpec = {
-                        // Un solo movimiento para todo: el panel nuevo entra deslizando de lado y el anterior sale por el otro
-                        // (solo capa gráfica: no se recalcula el diseño). Hacia la Calculadora entra por la derecha.
-                        val dir = if (targetState == Mode.Calc) 1 else -1
-                        (slideInHorizontally(SLIDE) { dir * it } + fadeIn(tween(220, easing = EaseOut)))
-                            .togetherWith(slideOutHorizontally(SLIDE) { -dir * it } + fadeOut(tween(260)))
-                            .using(SizeTransform(clip = false) { _, _ -> snap() })
-                    },
-                ) { m ->
-                    if (m == Mode.Calc) {
-                        CalcCard(vm, cur, r, accent, ink, Modifier.fillMaxSize())
-                    } else Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                val shape = RoundedCornerShape(28.dp)
+                Reveal(5, Modifier.weight(1f)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
                         Column(
                             Modifier.fillMaxWidth()
                                 .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
@@ -441,7 +401,7 @@ private fun Screen(vm: RatesViewModel) {
                                 .padding(vertical = 8.dp),
                         ) {
                             AmountRow(cur.label, cur.symbol, accent, ink, vm.foreignText, vm::onForeign, onDone = { keyboard?.hide() })
-                            Divider(cur, r)
+                            Divider()
                             AmountRow("Bolívares", "Bs", Red, RedInk, vm.bsText, vm::onBs, onDone = { keyboard?.hide() })
                         }
                         if (vm.foreignText.isNotEmpty() || vm.bsText.isNotEmpty()) {
@@ -449,21 +409,98 @@ private fun Screen(vm: RatesViewModel) {
                         }
                     }
                 }
-            }
 
-            vm.error?.let {
-                Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
+                vm.error?.let {
+                    Text(it, color = Warn, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Medium)
+                }
             }
         }
+
+        // Menú lateral: entra desde la derecha sobre una capa que oscurece la app
+        AnimatedVisibility(visible = menu, enter = fadeIn(tween(280, easing = EaseOut)), exit = fadeOut(tween(280, easing = EaseOut))) {
+            Box(
+                Modifier.fillMaxSize().background(Color(0x6B050A14))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { menu = false },
+            )
         }
+        AnimatedVisibility(
+            visible = menu, modifier = Modifier.align(Alignment.CenterEnd),
+            enter = slideInHorizontally(tween(400, easing = EaseMove)) { it },
+            exit = slideOutHorizontally(tween(360, easing = EaseMove)) { it },
+        ) {
+            Drawer(
+                onClose = { menu = false },
+                onCalc = { menu = false; vm.openPage(Page.Calc) },
+                onCustom = { menu = false; vm.openPage(Page.Custom) },
+                onTheme = vm::toggleTheme,
+            )
         }
-        }
+
+        // Pantallas aparte: se deslizan desde la derecha y tapan el panel principal
+        PageOverlay(vm.page == Page.Calc, accent) { CalcPage(vm, cur, accent, ink, onPick = { picking = true }) }
+        PageOverlay(vm.page == Page.Custom, Gold) { CustomPage(vm) }
     }
 
     if (updating) vm.update?.let { UpdateDialog(vm, it, onDismiss = { updating = false }) }
 
     if (picking && vm.selectedDate != null) {
         PickDialog(vm, onDismiss = { picking = false })
+    }
+}
+
+@Composable
+private fun PageOverlay(visible: Boolean, accent: Color, content: @Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(tween(440, easing = EaseMove)) { it },
+        exit = slideOutHorizontally(tween(400, easing = EaseMove)) { it },
+    ) {
+        // Los toques que no caen en un control no atraviesan al panel de abajo
+        Box(
+            Modifier.fillMaxSize().appBackground(accent)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+        ) { content() }
+    }
+}
+
+/** Cabecera de una pantalla aparte: flecha para volver, título y (opcional) un botón a la derecha. */
+@Composable
+private fun PageHeader(title: String, onBack: () -> Unit, titleSize: TextUnit = 26.sp, action: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        RoundButton("Volver", onBack) { ChevronIcon(left = true, Ink, Modifier.size(20.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            title, color = Ink, fontSize = titleSize, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.7).sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        action()
+    }
+}
+
+/** Botón redondo de 48 dp con borde (cabeceras y menú). */
+@Composable
+private fun RoundButton(description: String, onClick: () -> Unit, enabled: Boolean = true, content: @Composable BoxScope.() -> Unit) {
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(Surface1)
+            .border(1.dp, Line, CircleShape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
+/** Calculadora: pantalla aparte con su propia barra de fecha (comparte la fecha con el panel principal). */
+@Composable
+private fun CalcPage(vm: RatesViewModel, cur: Cur, accent: Color, ink: Color, onPick: () -> Unit) {
+    ScaledPage { contentH ->
+        PageColumn(contentH) {
+            PageHeader("Calculadora", onBack = { vm.openPage(null) })
+            DateBar(vm, ink, onPick = onPick)
+            CalcCurrencies(vm, cur, vm.selectedDate)
+            CalcCard(vm, cur, accent, ink, Modifier.weight(1f).fillMaxWidth())
+        }
     }
 }
 
@@ -497,106 +534,100 @@ private fun PickDialog(vm: RatesViewModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, onUpdate: () -> Unit, onTheme: () -> Unit) {
+private fun Header(loading: Boolean, hasUpdate: Boolean, onRefresh: () -> Unit, onUpdate: () -> Unit, onMenu: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("cups", color = Ink, fontSize = 30.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.8).sp)
         Spacer(Modifier.weight(1f))
         if (hasUpdate) {
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).background(Surface1)
-                    .border(1.dp, Line, CircleShape)
-                    .clickable(role = Role.Button, onClick = onUpdate)
-                    .semantics { contentDescription = "Actualización disponible" },
-                contentAlignment = Alignment.Center,
-            ) {
+            RoundButton("Actualización disponible", onUpdate) {
                 UpdateIcon(Ink, Modifier.size(22.dp))
                 Box(Modifier.align(Alignment.TopEnd).padding(7.dp).size(10.dp).clip(CircleShape).background(Red).border(2.dp, Paper, CircleShape))
             }
             Spacer(Modifier.width(10.dp))
         }
-        InfoButton()
-        Spacer(Modifier.width(10.dp))
-        Box(
-            Modifier.size(48.dp).clip(CircleShape).background(Surface1)
-                .border(1.dp, Line, CircleShape)
-                .clickable(role = Role.Button, onClick = onTheme)
-                .semantics { contentDescription = "Tema: " + when (AppTheme.mode) { "dark" -> "oscuro"; "light" -> "claro"; else -> "automático" } },
-            contentAlignment = Alignment.Center,
-        ) {
-            ThemeIcon(AppTheme.mode, Ink, Modifier.size(22.dp))
-        }
-        Spacer(Modifier.width(10.dp))
         val spin = rememberInfiniteTransition(label = "spin").animateFloat(
             0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "deg",
         )
-        Box(
-            Modifier.size(48.dp).clip(CircleShape).background(Surface1)
-                .border(1.dp, Line, CircleShape)
-                .clickable(enabled = !loading, role = Role.Button, onClick = onRefresh)
-                .semantics { contentDescription = "Actualizar tasas" },
-            contentAlignment = Alignment.Center,
-        ) {
+        RoundButton("Actualizar tasas", onRefresh, enabled = !loading) {
             RefreshIcon(Ink, Modifier.size(20.dp).rotate(if (loading) spin.value else 0f))
         }
+        Spacer(Modifier.width(10.dp))
+        RoundButton("Abrir menú", onMenu) { MenuIcon(Ink, Modifier.size(22.dp)) }
     }
 }
 
-/** Botón "i": abre una tarjeta flotante con la versión; se cierra al tocar fuera. */
+/** Menú lateral: Calculadora, Tasa personalizada, Apariencia (claro / oscuro) e información de la versión. */
 @Composable
-private fun InfoButton() {
-    var open by remember { mutableStateOf(false) }
-    // El popup vive mientras dure la animación de salida
-    val visible = remember { MutableTransitionState(false) }
-    visible.targetState = open
-    val press by animateFloatAsState(if (open) 1f else 0f, tween(260, easing = EaseOut), label = "infoPress")
-    Box(
-        Modifier.size(48.dp).clip(CircleShape).background(Surface1)
-            .border(1.dp, Line, CircleShape)
-            .clickable(role = Role.Button) { open = !open }
-            .semantics { contentDescription = "Información de la app" },
-        contentAlignment = Alignment.Center,
+private fun Drawer(onClose: () -> Unit, onCalc: () -> Unit, onCustom: () -> Unit, onTheme: () -> Unit) {
+    val version = Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)
+    val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
+    val themeName = when (AppTheme.mode) { "dark" -> "Oscuro"; "light" -> "Claro"; else -> "Automático" }
+    Column(
+        Modifier.fillMaxHeight().width(minOf(300.dp, screenW * 0.88f))
+            .shadow(20.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+            .clip(shape).background(Paper).border(1.dp, Line, shape)
+            // el panel no deja pasar los toques a la capa oscura (que lo cerraría)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .statusBarsPadding().navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        InfoIcon(Ink, Modifier.size(22.dp).graphicsLayer { scaleX = 1f - 0.12f * press; scaleY = 1f - 0.12f * press })
-        if (visible.currentState || visible.targetState) {
-            val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 10.dp.roundToPx() }
-            val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.roundToPx() }
-            Popup(
-                popupPositionProvider = object : PopupPositionProvider {
-                    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize) =
-                        IntOffset(
-                            (anchorBounds.right - popupContentSize.width).coerceIn(edge, maxOf(edge, windowSize.width - popupContentSize.width - edge)),
-                            anchorBounds.bottom + gap,
-                        )
-                },
-                onDismissRequest = { open = false },
-                properties = PopupProperties(focusable = true),
-            ) {
-                AnimatedVisibility(
-                    visibleState = visible,
-                    enter = fadeIn(tween(160, easing = EaseOut)) +
-                        scaleIn(spring(dampingRatio = 0.72f, stiffness = 520f), initialScale = 0.72f, transformOrigin = TransformOrigin(0.88f, 0f)) +
-                        slideInVertically(tween(260, easing = EaseOut)) { -it / 10 },
-                    exit = fadeOut(tween(120, easing = EaseOut)) +
-                        scaleOut(tween(150, easing = EaseOut), targetScale = 0.9f, transformOrigin = TransformOrigin(0.88f, 0f)),
-                ) { InfoCard() }
-            }
+        Row(Modifier.fillMaxWidth().padding(start = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Menú", color = Ink, fontSize = 30.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.8).sp, modifier = Modifier.weight(1f),
+            )
+            RoundButton("Cerrar menú", onClose) { CloseIcon(Ink, Modifier.size(20.dp)) }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            MenuItem("Calculadora", "Suma, resta y convierte al instante", gold = true, chevron = true, onClick = onCalc) { CalcIcon(it, Modifier.size(22.dp)) }
+            MenuItem("Tasa personalizada", "Calcula con la tasa que tú elijas", gold = true, chevron = true, onClick = onCustom) { SlidersIcon(it, Modifier.size(22.dp)) }
+            MenuItem("Apariencia", themeName, onClick = onTheme) { ThemeIcon(AppTheme.mode, it, Modifier.size(22.dp)) }
+            Spacer(Modifier.height(6.dp))
+            MenuItem("cups", "Versión $version") { InfoIcon(it, Modifier.size(22.dp)) }
         }
     }
 }
 
+/** Elemento del menú: icono en círculo, título y detalle. Sin [onClick] es solo informativo (borde punteado). */
 @Composable
-private fun InfoCard() {
-    val version = Updater.installedVersion(androidx.compose.ui.platform.LocalContext.current)
+private fun MenuItem(
+    title: String, detail: String, gold: Boolean = false, chevron: Boolean = false, onClick: (() -> Unit)? = null,
+    icon: @Composable (Color) -> Unit,
+) {
     val shape = RoundedCornerShape(22.dp)
-    Column(
-        Modifier.width(200.dp)
-            .shadow(20.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
-            .clip(shape).background(Paper).border(1.dp, Line, shape)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, tween(160, easing = EaseOut), label = "miPress")
+    val line = Line
+    Row(
+        Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.clip(shape)
+            .then(
+                if (onClick != null) Modifier.background(Surface1).border(1.dp, Line, shape)
+                    .clickable(interactionSource = press, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
+                else Modifier.drawBehind {
+                    drawRoundRect(
+                        line, cornerRadius = CornerRadius(22.dp.toPx()),
+                        style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))),
+                    )
+                },
+            )
+            .padding(start = 12.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("cups", color = Ink, fontSize = 22.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp)
-        Text("Versión $version", color = Muted, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+        Box(
+            Modifier.size(44.dp).clip(CircleShape)
+                .background(if (gold) Gold.copy(alpha = 0.22f) else Paper)
+                .border(1.dp, if (gold) Gold.copy(alpha = 0.55f) else Line, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) { icon(if (gold) GoldInk else Ink) }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = Ink, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+            Text(detail, color = Muted, fontSize = 12.5.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+        }
+        if (chevron) ChevronIcon(left = false, Hint, Modifier.size(18.dp))
     }
 }
 
@@ -836,26 +867,19 @@ private fun Coin(label: String, color: Color, size: Int) {
 }
 
 @Composable
-private fun Divider(cur: Cur, rate: Rate?) {
-    Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
+private fun Divider(height: Dp = 28.dp) {
+    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(1.dp).background(Line))
-        if (rate != null) {
-            Text(
-                "1 ${cur.symbol} = Bs. ${money(rate.value)}",
-                color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold,
-                style = TextStyle(fontFeatureSettings = TNUM),
-                modifier = Modifier.clip(CircleShape).background(Surface1).border(1.dp, Line, CircleShape)
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
     }
 }
 
 @Composable
 private fun AmountRow(
     label: String, symbol: String, tint: Color, tintInk: Color, value: String,
-    onChange: (String) -> Unit, onDone: () -> Unit,
+    onChange: (String) -> Unit, onDone: () -> Unit, compact: Boolean = false,
 ) {
+    val big = if (compact) 34.sp else 38.sp
+    val long = if (compact) 26.sp else 28.sp
     val clipboard = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -863,7 +887,7 @@ private fun AmountRow(
     val selection = TextSelectionColors(handleColor = tintInk, backgroundColor = tint.copy(alpha = 0.35f))
 
     Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = if (compact) 8.dp else 12.dp, bottom = if (compact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -886,13 +910,13 @@ private fun AmountRow(
                     keyboardActions = KeyboardActions(onDone = { onDone() }),
                     textStyle = TextStyle(
                         color = Ink, fontFamily = Manrope, fontWeight = FontWeight.Bold,
-                        fontSize = if (value.length > 10) 28.sp else 38.sp,
+                        fontSize = if (value.length > 10) long else big,
                         fontFeatureSettings = TNUM, letterSpacing = (-0.8).sp,
                     ),
                     cursorBrush = SolidColor(tintInk),
                     decorationBox = { inner ->
                         Box {
-                            if (value.isEmpty()) Text("0,00", color = Hint, fontFamily = Manrope, fontWeight = FontWeight.Bold, fontSize = 38.sp, letterSpacing = (-0.8).sp)
+                            if (value.isEmpty()) Text("0,00", color = Hint, fontFamily = Manrope, fontWeight = FontWeight.Bold, fontSize = big, letterSpacing = (-0.8).sp)
                             inner()
                         }
                     },
@@ -1025,29 +1049,6 @@ private fun ChangeCard(c: Cur, ch: Change?, ink: Color) {
 }
 
 @Composable
-private fun ModeToggle(mode: Mode, ink: Color, onMode: (Mode) -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
-    // La pastilla se desliza entre las dos opciones en vez de saltar
-    val bias by animateFloatAsState(if (mode == Mode.Calc) 1f else -1f, tween(300, easing = EaseMove), label = "modeBias")
-    Box(Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(4.dp)) {
-        Box(Modifier.fillMaxWidth(0.5f).height(44.dp).align(BiasAlignment(bias, 0f)).clip(RoundedCornerShape(12.dp)).background(Paper))
-        Row(Modifier.fillMaxWidth()) {
-            listOf(Mode.Convert to "Convertir", Mode.Calc to "Calculadora").forEach { (m, label) ->
-                val sel = m == mode
-                val textColor by animateColorAsState(if (sel) ink else Muted, tween(250, easing = EaseOut), label = "modeText")
-                Box(
-                    Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
-                        .selectable(selected = sel, role = Role.Tab) { onMode(m) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(label, color = textColor, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun Pill(text: String, ink: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Text(
         text, color = ink, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
@@ -1057,7 +1058,7 @@ private fun Pill(text: String, ink: Color, modifier: Modifier = Modifier, onClic
 }
 
 @Composable
-private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink: Color, modifier: Modifier = Modifier) {
+private fun CalcCard(vm: RatesViewModel, cur: Cur, accent: Color, ink: Color, modifier: Modifier = Modifier) {
     val inBs = vm.calcInBs
     val fromSym = if (inBs) "Bs" else cur.symbol
     val toSym = if (inBs) cur.symbol else "Bs"
@@ -1069,9 +1070,8 @@ private fun CalcCard(vm: RatesViewModel, cur: Cur, r: Rate?, accent: Color, ink:
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp).rise(0),
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.Bottom,
         ) {
-            PageDots(onBack = { vm.onMode(Mode.Convert) }, ink = ink)
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                 Text(
                     shown, color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.End,
@@ -1137,25 +1137,9 @@ private fun SmallChevron(color: Color, modifier: Modifier) = Canvas(modifier) {
 }
 
 /**
- * Franja de monedas de la calculadora (ocupa el lugar de las tarjetas): dos burbujas centradas, Bolívares y la moneda extranjera.
+ * Franja de monedas de la calculadora (bajo la barra de fecha): dos burbujas centradas, Bolívares y la moneda extranjera.
  * Tocar la flecha o Bolívares intercambia el sentido; tocar la moneda extranjera abre la lista para elegir Dólar, Euro o USDT.
  */
-/** Indicador de página: dos puntos (Convertir, Calculadora). Dice que hay otra página al lado; tocar el primero vuelve. */
-@Composable
-private fun PageDots(onBack: () -> Unit, ink: Color) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-        // dos casillas iguales, cada punto centrado en la suya: el conjunto queda simétrico respecto al centro
-        Box(
-            Modifier.size(width = 26.dp, height = 24.dp).clip(CircleShape)
-                .clickable(role = Role.Button, onClickLabel = "Volver a Convertir", onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) { Box(Modifier.size(5.dp).clip(CircleShape).background(Muted.copy(alpha = 0.4f))) }
-        Box(Modifier.size(width = 26.dp, height = 24.dp), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(width = 16.dp, height = 5.dp).clip(CircleShape).background(ink))
-        }
-    }
-}
-
 @Composable
 private fun CalcCurrencies(vm: RatesViewModel, cur: Cur, d: LocalDate?) {
     val inBs = vm.calcInBs
@@ -1253,4 +1237,225 @@ private fun CalcKey(k: String, accent: Color, ink: Color, modifier: Modifier, vm
             fontFamily = Manrope, fontWeight = if (isOp || k == "=") FontWeight.Bold else FontWeight.Medium,
         )
     }
+}
+
+/**
+ * Tasa personalizada: tasa × monto en dólares = bolívares (o al revés) y la comparación con la tasa oficial.
+ * Cabe entera en una pantalla (medidas algo más compactas que el panel principal).
+ */
+@Composable
+private fun CustomPage(vm: RatesViewModel) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    val shape = RoundedCornerShape(28.dp)
+    ScaledPage { contentH ->
+        PageColumn(contentH, gap = 14.dp) {
+            PageHeader("Tasa personalizada", onBack = { keyboard?.hide(); vm.openPage(null) }, titleSize = 22.sp) {
+                // Reiniciar los montos (la tasa se queda): solo aparece cuando hay algo escrito
+                AnimatedVisibility(
+                    visible = vm.customForeign.isNotEmpty() || vm.customBs.isNotEmpty(),
+                    enter = fadeIn(tween(200, easing = EaseOut)) + scaleIn(tween(240, easing = EaseOut), initialScale = 0.8f),
+                    exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.8f),
+                ) {
+                    RoundButton("Reiniciar montos", vm::clearCustom) {
+                        RefreshIcon(Ink, Modifier.size(20.dp).graphicsLayer { scaleX = -1f })
+                    }
+                }
+            }
+
+            // Tu tasa [campo]: fuera de la tarjeta para no pegar tres cajas seguidas
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Tu tasa", color = Ink, fontSize = 18.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp)
+                Spacer(Modifier.width(12.dp))
+                RateField(vm.customRate, vm.customNeedsRate, vm::onCustomRate, onDone = { keyboard?.hide() }, Modifier.weight(1f))
+            }
+
+            Column(
+                Modifier.fillMaxWidth()
+                    .shadow(16.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+                    .clip(shape)
+                    .background(Paper)
+                    .border(BorderStroke(1.dp, Brush.verticalGradient(listOf(Gold.copy(alpha = 0.6f), Line))), shape)
+                    .padding(vertical = 8.dp),
+            ) {
+                AmountRow("Dólar", "$", Gold, GoldInk, vm.customForeign, vm::onCustomForeign, onDone = { keyboard?.hide() }, compact = true)
+                Divider(20.dp)
+                AmountRow("Bolívares", "Bs", Red, RedInk, vm.customBs, vm::onCustomBs, onDone = { keyboard?.hide() }, compact = true)
+            }
+
+            CompareSection(vm)
+        }
+    }
+}
+
+/** Campo de la tasa en forma de píldora, con el número siempre centrado. Se marca si faltan los datos para calcular. */
+@Composable
+private fun RateField(value: String, need: Boolean, onChange: (String) -> Unit, onDone: () -> Unit, modifier: Modifier) {
+    val focus = remember { MutableInteractionSource() }
+    val focused by focus.collectIsFocusedAsState()
+    val stroke by animateColorAsState(if (focused) GoldInk else if (need) Warn else Line, tween(200), label = "rateStroke")
+    val selection = TextSelectionColors(handleColor = GoldInk, backgroundColor = Gold.copy(alpha = 0.35f))
+    val style = TextStyle(
+        color = Ink, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp,
+        fontFeatureSettings = TNUM, letterSpacing = (-0.5).sp, textAlign = TextAlign.Center,
+    )
+    CompositionLocalProvider(LocalTextSelectionColors provides selection) {
+        BasicTextField(
+            value = value,
+            onValueChange = { t -> if (t.length <= 14 && t.all { it.isDigit() || it == ',' || it == '.' }) onChange(t) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            interactionSource = focus,
+            textStyle = style,
+            cursorBrush = SolidColor(GoldInk),
+            modifier = modifier.height(52.dp).semantics { contentDescription = "Tu tasa" },
+            decorationBox = { inner ->
+                Box(
+                    Modifier.fillMaxSize().clip(CircleShape).background(Surface1)
+                        .border(if (focused) 1.5.dp else 1.dp, stroke, CircleShape).padding(horizontal = 22.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (value.isEmpty()) Text("0,00", style = style.copy(color = Hint), modifier = Modifier.fillMaxWidth())
+                    Box(Modifier.fillMaxWidth(), propagateMinConstraints = true) { inner() }
+                }
+            },
+        )
+    }
+}
+
+/** El mismo monto a tu tasa y a la tasa de la moneda elegida, y la diferencia entre ambos. */
+@Composable
+private fun CompareSection(vm: RatesViewModel) {
+    val c = vm.cmpCur
+    val ink by animateColorAsState(inkOf(c), tween(300, easing = EaseOut), label = "cmpInk")
+    val cmp = vm.compare
+    val name = if (c.official) "${c.label} BCV" else "USDT promedio"
+    val market = cmp.market
+    val whenText = market?.let { if (c == Cur.USDT && it.date == LocalDate.now()) "en vivo" else shortDate(it.date) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Comparar con la tasa de", color = Muted, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        CompareTabs(c, ink, vm::onCmp)
+        val shape = RoundedCornerShape(24.dp)
+        Column(
+            Modifier.fillMaxWidth()
+                .shadow(12.dp, shape, ambientColor = SoftShadow, spotColor = SoftShadow)
+                .clip(shape).background(Paper).border(1.dp, Line, shape).padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            CompareLine("Tu tasa", cmp.rate?.let { "Bs. ${money(it)}" } ?: "—", if (cmp.ready) "Bs. ${money(cmp.mine)}" else "—")
+            CompareLine(name, market?.let { "Bs. ${money(it.value)} · $whenText" } ?: "sin datos", if (cmp.ready) "Bs. ${money(cmp.other)}" else "—")
+            val diff = cmp.mine - cmp.other
+            val up = cmp.ready && diff > 0.0049
+            val down = cmp.ready && diff < -0.0049
+            // La diferencia no juzga (subir o bajar no es bueno ni malo aquí): usa el color de la moneda elegida
+            val tone by animateColorAsState(if (up || down) ink else Muted, tween(350, easing = EaseOut), label = "cmpTone")
+            val box = RoundedCornerShape(18.dp)
+            Row(
+                Modifier.fillMaxWidth().clip(box).background(Surface1).border(1.dp, Line, box)
+                    .padding(horizontal = 14.dp, vertical = 10.dp).semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Tick(if (cmp.ready) "Tu tasa vs $name" else "Diferencia") { t ->
+                        Text(t, color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
+                    }
+                    Tick(if (!cmp.ready) "—" else "${if (up) "▲ +" else if (down) "▼ −" else "• "}${money(kotlin.math.abs(diff))} Bs") { t ->
+                        Text(t, color = tone, fontSize = 19.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, style = TextStyle(fontFeatureSettings = TNUM))
+                    }
+                }
+                val pct = if (cmp.ready && cmp.other != 0.0) "${if (up) "+" else if (down) "−" else ""}${String.format(Locale.GERMANY, "%.2f", kotlin.math.abs(diff / cmp.other * 100))}%" else "—"
+                Tick(pct, modifier = Modifier.clip(CircleShape).background(tone.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 6.dp)) { t ->
+                    Text(t, color = tone, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** Línea de la comparación: nombre y total arriba; el detalle (la tasa) debajo, a todo el ancho. */
+@Composable
+private fun CompareLine(name: String, detail: String, total: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(name, color = Ink, fontSize = 15.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Tick(total) { t ->
+                Text(
+                    t, color = Ink, fontSize = 19.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                    letterSpacing = (-0.4).sp, style = TextStyle(fontFeatureSettings = TNUM),
+                )
+            }
+        }
+        Tick(detail) { t ->
+            Text(t, color = Muted, fontSize = 12.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold, style = TextStyle(fontFeatureSettings = TNUM))
+        }
+    }
+}
+
+/** Selector de la moneda de comparación: la pastilla se desliza entre Dólar, Euro y USDT. */
+@Composable
+private fun CompareTabs(cur: Cur, ink: Color, onPick: (Cur) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    val bias by animateFloatAsState(cur.ordinal - 1f, tween(300, easing = EaseMove), label = "cmpBias")
+    Box(Modifier.fillMaxWidth().clip(shape).background(Surface1).border(1.dp, Line, shape).padding(4.dp)) {
+        Box(
+            Modifier.fillMaxWidth(1f / 3f).height(40.dp).align(BiasAlignment(bias, 0f))
+                .shadow(2.dp, RoundedCornerShape(12.dp), ambientColor = SoftShadow, spotColor = SoftShadow)
+                .clip(RoundedCornerShape(12.dp)).background(Paper),
+        )
+        Row(Modifier.fillMaxWidth()) {
+            Cur.entries.forEach { c ->
+                val sel = c == cur
+                val textColor by animateColorAsState(if (sel) ink else Muted, tween(250, easing = EaseOut), label = "cmpText")
+                Row(
+                    Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
+                        .selectable(selected = sel, role = Role.Tab) { onPick(c) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Coin(c.symbol, accentOf(c), 20)
+                    Spacer(Modifier.width(6.dp))
+                    Text(c.label, color = textColor, fontSize = 14.sp, fontFamily = Manrope, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.09f
+    for (y in listOf(0.29f, 0.5f, 0.71f)) {
+        drawLine(color, Offset(size.width * 0.19f, size.height * y), Offset(size.width * 0.81f, size.height * y), w, StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun CloseIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.1f
+    drawLine(color, Offset(size.width * 0.25f, size.height * 0.25f), Offset(size.width * 0.75f, size.height * 0.75f), w, StrokeCap.Round)
+    drawLine(color, Offset(size.width * 0.75f, size.height * 0.25f), Offset(size.width * 0.25f, size.height * 0.75f), w, StrokeCap.Round)
+}
+
+@Composable
+private fun CalcIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.085f
+    drawRoundRect(color, Offset(size.width * 0.19f, size.height * 0.12f), Size(size.width * 0.62f, size.height * 0.76f), CornerRadius(size.width * 0.13f), style = Stroke(w))
+    drawLine(color, Offset(size.width * 0.33f, size.height * 0.31f), Offset(size.width * 0.67f, size.height * 0.31f), w, StrokeCap.Round)
+    for (y in listOf(0.5f, 0.67f)) for (x in listOf(0.35f, 0.5f, 0.65f)) {
+        drawCircle(color, radius = w * 0.75f, center = Offset(size.width * x, size.height * y))
+    }
+}
+
+@Composable
+private fun SlidersIcon(color: Color, modifier: Modifier) = Canvas(modifier) {
+    val w = size.width * 0.085f
+    drawLine(color, Offset(size.width * 0.17f, size.height * 0.29f), Offset(size.width * 0.54f, size.height * 0.29f), w, StrokeCap.Round)
+    drawLine(color, Offset(size.width * 0.71f, size.height * 0.29f), Offset(size.width * 0.83f, size.height * 0.29f), w, StrokeCap.Round)
+    drawCircle(color, radius = size.width * 0.092f, center = Offset(size.width * 0.625f, size.height * 0.29f), style = Stroke(w))
+    drawLine(color, Offset(size.width * 0.17f, size.height * 0.71f), Offset(size.width * 0.29f, size.height * 0.71f), w, StrokeCap.Round)
+    drawLine(color, Offset(size.width * 0.46f, size.height * 0.71f), Offset(size.width * 0.83f, size.height * 0.71f), w, StrokeCap.Round)
+    drawCircle(color, radius = size.width * 0.092f, center = Offset(size.width * 0.375f, size.height * 0.71f), style = Stroke(w))
 }

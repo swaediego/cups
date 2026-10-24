@@ -23,7 +23,8 @@ enum class Cur(val label: String, val symbol: String, val url: String, val offic
     USDT("USDT", "₮", "https://ve.dolarapi.com/v1/historicos/dolares/paralelo", official = false),
 }
 
-enum class Mode { Convert, Calc }
+/** Pantallas aparte que se abren desde el menú lateral sobre el panel principal. */
+enum class Page { Calc, Custom }
 
 /** Tasa publicada por el BCV con su fecha valor. */
 data class Rate(val value: Double, val date: LocalDate)
@@ -108,7 +109,8 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var bsText by mutableStateOf("")
         private set
-    var mode by mutableStateOf(Mode.Convert)
+    /** Pantalla aparte abierta (null = panel principal). */
+    var page by mutableStateOf<Page?>(null)
         private set
     var expr by mutableStateOf("")
         private set
@@ -342,7 +344,7 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
         pin(d.lastOrNull { !it.isAfter(day) } ?: d.firstOrNull())
     }
 
-    fun onMode(m: Mode) { mode = m }
+    fun openPage(p: Page?) { page = p }
     fun toggleCalcSide() { calcInBs = !calcInBs }
 
     val calcResult: Double? get() = evalExpr(expr)
@@ -411,4 +413,57 @@ class RatesViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /* ---------- Tasa personalizada ----------
+       Tasa × monto en dólares = bolívares (o al revés). Es independiente de las tasas del BCV.
+       Solo se guarda la tasa elegida (y la moneda de comparación); los montos empiezan en blanco. */
+    var customRate by mutableStateOf(prefs.getString("customRate", null) ?: "")
+        private set
+    var customForeign by mutableStateOf("")
+        private set
+    var customBs by mutableStateOf("")
+        private set
+    private var customLast = Field.Foreign
+    var cmpCur by mutableStateOf(Cur.entries.firstOrNull { it.name == prefs.getString("customCmp", null) } ?: Cur.USD)
+        private set
+
+    private fun customRateValue() = parse(customRate)?.takeIf { it > 0 }
+    private fun fmtSafe(v: Double) = if (v.isFinite() && kotlin.math.abs(v) < 1e15) fmt(v) else ""
+
+    private fun recalcCustom() {
+        val r = customRateValue()
+        if (customLast == Field.Foreign) customBs = r?.let { rate -> parse(customForeign)?.let { fmtSafe(it * rate) } } ?: ""
+        else customForeign = r?.let { rate -> parse(customBs)?.let { fmtSafe(it / rate) } } ?: ""
+    }
+
+    fun onCustomRate(t: String) {
+        customRate = t
+        prefs.edit().putString("customRate", t).apply()
+        recalcCustom()
+    }
+    fun onCustomForeign(t: String) { customForeign = t; customLast = Field.Foreign; recalcCustom() }
+    fun onCustomBs(t: String) { customBs = t; customLast = Field.Bs; recalcCustom() }
+    fun clearCustom() { customForeign = ""; customBs = ""; customLast = Field.Foreign }
+
+    /** Hay montos escritos pero no una tasa válida: la casilla de la tasa se marca. */
+    val customNeedsRate: Boolean get() = customRateValue() == null && (customForeign.isNotEmpty() || customBs.isNotEmpty())
+
+    fun onCmp(c: Cur) {
+        cmpCur = c
+        prefs.edit().putString("customCmp", c.name).apply()
+    }
+
+    /** El mismo monto a tu tasa y a la tasa de la moneda elegida (la del BCV, o el promedio en el caso del USDT). */
+    data class Compare(val rate: Double?, val market: Rate?, val mine: Double, val other: Double, val ready: Boolean)
+
+    val compare: Compare
+        get() {
+            val rate = customRateValue()
+            val market = rateFor(cmpCur)
+            // El monto sale de lo último que escribió el usuario (si fueron bolívares, sin el redondeo del campo de dólares)
+            val amount = rate?.let { if (customLast == Field.Foreign) parse(customForeign) else parse(customBs)?.div(it) }
+            val ready = rate != null && market != null && amount != null && amount.isFinite()
+            return if (ready) Compare(rate, market, amount!! * rate!!, amount * market!!.value, true)
+            else Compare(rate, market, 0.0, 0.0, false)
+        }
 }
