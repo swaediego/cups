@@ -68,7 +68,7 @@ object RatesSync {
             if (o.isNull("promedio")) continue
             out += Rate(o.getDouble("promedio"), LocalDate.parse(o.getString("fecha").take(10)))
         }
-        return out.sortedBy { it.date }
+        return sanitize(out.sortedBy { it.date })
     }
 
     fun fetchLive(): Rate? {
@@ -98,11 +98,19 @@ object RatesSync {
         return if (rates.isEmpty()) null else date to rates
     }
 
+    /** La segunda fuente trae la tasa con todos sus decimales: si ya tenemos esa fecha, se usa su valor exacto. */
+    private fun useExact(h: Map<Cur, List<Rate>>, n: Pair<LocalDate, Map<Cur, Double>>): Map<Cur, List<Rate>> =
+        h.mapValues { (c, l) ->
+            val v = n.second[c] ?: return@mapValues l
+            l.map { if (it.date == n.first && Math.abs(v / it.value - 1) < 0.01) Rate(v, it.date) else it }
+        }
+
     /** Si aún no hay tasa futura guardada, la busca en la segunda fuente; descarta valores muy distintos a la última tasa. */
-    private fun addNext(h: Map<Cur, List<Rate>>): Map<Cur, List<Rate>> {
-        val last = lastOfficialDate(h)
+    private fun addNext(h0: Map<Cur, List<Rate>>): Map<Cur, List<Rate>> {
+        val last = lastOfficialDate(h0)
+        val n = runCatching { fetchNextBcv() }.getOrNull() ?: return h0
+        val h = useExact(h0, n)
         if (last != null && last.isAfter(LocalDate.now(CARACAS))) return h
-        val n = runCatching { fetchNextBcv() }.getOrNull() ?: return h
         if (last != null && !n.first.isAfter(last)) return h
         return h.mapValues { (c, l) ->
             val v = n.second[c]
@@ -112,10 +120,13 @@ object RatesSync {
 
     fun load(prefs: SharedPreferences, c: Cur): List<Rate> {
         val raw = prefs.getString("hist_${c.name}", null) ?: return emptyList()
-        return raw.split(';').mapNotNull { e ->
+        val list = raw.split(';').mapNotNull { e ->
             val p = e.split('=')
-            if (p.size != 2) null else try { Rate(p[1].toDouble(), LocalDate.parse(p[0])) } catch (x: Exception) { null }
+            if (p.size != 2) null else try {
+                Rate(p[1].removeSuffix("~").toDouble(), LocalDate.parse(p[0]), approx = p[1].endsWith("~"))
+            } catch (x: Exception) { null }
         }.sortedBy { it.date }
+        return if (c.official) sanitize(list) else list
     }
 
     fun loadLive(prefs: SharedPreferences): Rate? {
@@ -170,7 +181,7 @@ object RatesSync {
             if (c.official) merge(fetched[c], load(prefs, c)) else fetched[c] ?: load(prefs, c)
         })
         prefs.edit().apply {
-            fresh.forEach { (c, list) -> putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}" }) }
+            fresh.forEach { (c, list) -> putString("hist_${c.name}", list.joinToString(";") { "${it.date}=${it.value}${if (it.approx) "~" else ""}" }) }
             live?.let { putString("usdt_live", "${it.date}=${it.value}"); putString("usdt_samples", addSample(prefs, it.value)) }
             if (!officialOnly) putLong(LAST_SYNC, System.currentTimeMillis())
         }.apply()

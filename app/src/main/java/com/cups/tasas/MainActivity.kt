@@ -821,7 +821,7 @@ private fun RateTile(c: Cur, r: Rate?, selected: Boolean, modifier: Modifier, on
             Coin(c.symbol, accent, 22)
             Text(c.label, color = if (selected) Ink else Muted, fontSize = 13.sp, fontFamily = Manrope, fontWeight = FontWeight.SemiBold)
         }
-        Tick(r?.let { money(it.value) } ?: "—") { t ->
+        Tick(r?.let { (if (it.approx) "≈" else "") + money(it.value) } ?: "—") { t ->
             Text(
                 t, color = Ink, fontSize = 20.sp, fontFamily = Manrope, fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.5).sp, style = TextStyle(fontFeatureSettings = TNUM),

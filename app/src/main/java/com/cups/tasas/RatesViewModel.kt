@@ -26,8 +26,25 @@ enum class Cur(val label: String, val symbol: String, val url: String, val offic
 /** Pantallas aparte que se abren desde el menú lateral sobre el panel principal. */
 enum class Page { Calc, Custom }
 
-/** Tasa publicada por el BCV con su fecha valor. */
-data class Rate(val value: Double, val date: LocalDate)
+/** Tasa publicada por el BCV con su fecha valor. [approx]: corregida de escala porque la fuente perdió los decimales. */
+data class Rate(val value: Double, val date: LocalDate, val approx: Boolean = false)
+
+/**
+ * Valida una serie de tasas ascendente. Una tasa diaria nunca se mueve más del doble de un día a otro; si un valor
+ * se sale de ese rango suele ser un error de escala de la fuente (p. ej. el euro "1.006" en vez de 1.006,03 Bs).
+ * Se intenta corregir por factores de 1000 o 100; si ni así encaja, se descarta. También descarta ceros y NaN.
+ */
+fun sanitize(rows: List<Rate>): List<Rate> {
+    val out = ArrayList<Rate>(rows.size)
+    for (r in rows) {
+        if (!r.value.isFinite() || r.value <= 0) continue
+        val prev = out.lastOrNull()?.value
+        if (prev == null || r.value / prev in 0.5..2.0) { out += r; continue }
+        val fixed = listOf(r.value * 1000, r.value / 1000, r.value * 100, r.value / 100).firstOrNull { it / prev in 0.5..2.0 }
+        if (fixed != null) out += Rate(fixed, r.date, approx = true)
+    }
+    return out
+}
 
 /** Variación de una tasa respecto a la publicación anterior. */
 /** [hours] != null: el cambio es contra una muestra de hace esas horas (USDT), no contra la publicación anterior. */
